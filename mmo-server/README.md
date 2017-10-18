@@ -17,8 +17,10 @@ OPTIONS:
     
 INSTALATION:
 Install https://www.rustup.rs
+git clone git@github.com:RedPillVR/mmo.git
+cd mmo/mmo-server
+cargo build
 
 RUN:
-cd mmo/mmo-server
 cargo run -- -a IP_OF_SERVER
 ```
