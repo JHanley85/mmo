@@ -15,7 +15,7 @@ OPTIONS:
     
     
     
-INSTALATION:
+INSTALLATION:
 Install https://www.rustup.rs
 git clone git@github.com:RedPillVR/mmo.git
 cd mmo/mmo-server
