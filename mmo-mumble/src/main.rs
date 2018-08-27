@@ -85,13 +85,13 @@ fn main() {
 
     let matches = app().get_matches();
 
-    let config : config::Config = {
-        let config_file = matches.value_of("cfg").unwrap_or("Config.toml");
-        let mut config_file = fs::File::open(config_file).unwrap();
-        let mut config = String::new();
-        config_file.read_to_string(&mut config).unwrap();
-        toml::from_str(&config).unwrap()
-    };
+     let config : config::Config = {
+         let config_file = matches.value_of("cfg").unwrap_or("Config.toml");
+         let mut config_file = fs::File::open(config_file).unwrap();
+         let mut config = String::new();
+         config_file.read_to_string(&mut config).unwrap();
+         toml::from_str(&config).unwrap()
+     };
 
     let access_key_id = &config.aws.access_key_id;
     let secret_access_key = &config.aws.secret_access_key;
