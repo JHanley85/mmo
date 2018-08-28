@@ -4,3 +4,8 @@ version = "0.1.0"
 authors = ["Alex Rozgo <alex.rozgo@gmail.com>"]
 
 [dependencies]
+
+futures-cpupool = "0.1"
+futures = { git = "https://github.com/alexcrichton/futures-rs", rev ="1dbecb488890b9aaf76f5ef5883f82804cccb0b6" }
+futures-io = { git = "https://github.com/alexcrichton/futures-rs", rev ="1dbecb488890b9aaf76f5ef5883f82804cccb0b6" }
+futures-mio = { git = "https://github.com/alexcrichton/futures-rs", rev ="1dbecb488890b9aaf76f5ef5883f82804cccb0b6" }
