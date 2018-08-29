@@ -1,0 +1,46 @@
+<W>2018-08-29 01:01:32.763 Initializing settings from /data/mumble-server.ini (basepath /data)
+<W>2018-08-29 01:01:32.764 Meta: TLS cipher preference is "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:AES256-SHA:AES128-SHA"
+<W>2018-08-29 01:01:32.764 OpenSSL: OpenSSL 1.0.2g  1 Mar 2016
+<W>2018-08-29 01:01:32.959 ServerDB: Opened SQLite database /data/mumble-server.sqlite
+<W>2018-08-29 01:01:32.962 Generating new tables...
+<W>2018-08-29 01:01:33.044 Failed to connect to D-Bus system
+<W>2018-08-29 01:01:33.050 MurmurIce: Endpoint "tcp -h 127.0.0.1 -p 6502" running
+<W>2018-08-29 01:01:33.154 Murmur 1.2.19 (1.2.19-1~ppa4~xenial1) running on X11: Ubuntu 16.04.2 LTS: Booting servers
+<W>2018-08-29 01:01:33.304 1 => Password for 'SuperUser' set to 'f!dJFlzzk'
+<W>2018-08-29 01:01:33.712 1 => Server listening on 0.0.0.0:64738
+<W>2018-08-29 01:01:33.792 1 => Failed to set IPV6_RECVPKTINFO for 0.0.0.0:64738
+<W>2018-08-29 01:01:33.879 1 => Generating new server certificate.
+<W>2018-08-29 01:01:34.193 1 => Announcing server via bonjour
+<W>2018-08-29 01:01:34.279 1 => Not registering server as public
+<W>2018-08-29 01:01:34.279 Object::connect: No such slot MurmurDBus::userTextMessage(const User *, const TextMessage &)
+<W>2018-08-29 01:01:58.702 1 => <1:(-1)> New connection: 172.16.238.1:51478
+<W>2018-08-29 01:02:00.211 1 => <1:(-1)> Client version 1.2.4 (X11: 1.2.4-0.2ubuntu1.1)
+<W>2018-08-29 01:02:00.291 1 => Starting voice thread
+<W>2018-08-29 01:02:00.377 1 => CELT codec switch ffffffff8000000b 0 (prefer ffffffff8000000b) (Opus 1)
+<W>2018-08-29 01:02:00.458 1 => <1:mumbot-3618(-1)> Authenticated
+<W>2018-08-29 01:03:57.057 1 => <1:mumbot-3618(-1)> Connection closed: The remote host closed the connection [1]
+<W>2018-08-29 01:03:57.139 1 => Ending voice thread
+<W>2018-08-29 01:04:19.381 Initializing settings from /data/mumble-server.ini (basepath /data)
+<W>2018-08-29 01:04:19.393 Meta: TLS cipher preference is "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:AES256-SHA:AES128-SHA"
+<W>2018-08-29 01:04:19.393 OpenSSL: OpenSSL 1.0.2g  1 Mar 2016
+<W>2018-08-29 01:04:19.472 ServerDB: Opened SQLite database /data/mumble-server.sqlite
+<W>2018-08-29 01:04:19.483 Failed to connect to D-Bus system
+<W>2018-08-29 01:04:19.484 MurmurIce: Endpoint "tcp -h 127.0.0.1 -p 6502" running
+<W>2018-08-29 01:04:19.550 Murmur 1.2.19 (1.2.19-1~ppa4~xenial1) running on X11: Ubuntu 16.04.2 LTS: Booting servers
+<W>2018-08-29 01:04:19.626 1 => Server listening on 0.0.0.0:64738
+<W>2018-08-29 01:04:19.711 1 => Failed to set IPV6_RECVPKTINFO for 0.0.0.0:64738
+<W>2018-08-29 01:04:19.806 1 => Announcing server via bonjour
+<W>2018-08-29 01:04:19.889 1 => Not registering server as public
+<W>2018-08-29 01:04:19.889 Object::connect: No such slot MurmurDBus::userTextMessage(const User *, const TextMessage &)
+<W>2018-08-29 01:05:01.643 Initializing settings from /data/mumble-server.ini (basepath /data)
+<W>2018-08-29 01:05:01.644 Meta: TLS cipher preference is "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:AES256-SHA:AES128-SHA"
+<W>2018-08-29 01:05:01.644 OpenSSL: OpenSSL 1.0.2g  1 Mar 2016
+<W>2018-08-29 01:05:01.680 ServerDB: Opened SQLite database /data/mumble-server.sqlite
+<W>2018-08-29 01:05:01.683 Failed to connect to D-Bus system
+<W>2018-08-29 01:05:01.684 MurmurIce: Endpoint "tcp -h 127.0.0.1 -p 6502" running
+<W>2018-08-29 01:05:01.720 Murmur 1.2.19 (1.2.19-1~ppa4~xenial1) running on X11: Ubuntu 16.04.2 LTS: Booting servers
+<W>2018-08-29 01:05:01.807 1 => Server listening on 0.0.0.0:64738
+<W>2018-08-29 01:05:01.877 1 => Failed to set IPV6_RECVPKTINFO for 0.0.0.0:64738
+<W>2018-08-29 01:05:01.963 1 => Announcing server via bonjour
+<W>2018-08-29 01:05:02.044 1 => Not registering server as public
+<W>2018-08-29 01:05:02.044 Object::connect: No such slot MurmurDBus::userTextMessage(const User *, const TextMessage &)

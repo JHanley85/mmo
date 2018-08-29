@@ -22,7 +22,7 @@ services:
                 ipv4_address: 172.16.238.11
     mmo-mumble:
         build: ./mmo-mumble/.
-        command: bash -c "cd /release/ && ./mmo-mumble --address 0.0.0.0:8080 --cfg  /release/Config.toml"
+        command: bash -c "cd /release/ && ./mmo-mumble --address 0.0.0.0:8080 --config  /release/Config.toml"
         ports:
             - "8082:8080"
         volumes: 
@@ -32,7 +32,6 @@ services:
                 ipv4_address: 172.16.238.12
     murmur:
         image: coppit/mumble-server:latest
-        container_name: mumble-server
         command: /bin/bash -c "/tmp/start.sh"
         ports: 
             - 64738:64738
@@ -44,8 +43,8 @@ services:
     web:
         image: nginx
         volumes:
-            - "/c/Users/Public/sites:/usr/share/nginx/html"
-            - "/c/Users/Public/sites/mysite.template:/etc/nginx/conf.d/mysite.template"
+            - ./my/static/content/:/usr/share/nginx/html/
+            - ./my/static/contentmysite.template/:/etc/nginx/conf.d/mysite.template
         ports:
             - "80:80"
         environment:
