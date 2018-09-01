@@ -68,9 +68,9 @@ fn main() {
     let (udp_socket_tx, udp_socket_rx) = server_socket.framed(LineCodec).split();
     let expiration = Duration::from_secs(exp);
     let clients = &mut HashMap::<SocketAddr, Client>::new();
-
+    println!("Waiting for clients on: {}", addr);
     let listen_task = udp_socket_rx.fold((clients, udp_socket_tx), |(clients, udp_socket_tx), (client_socket, msg)| {
-
+        println!("listen_task");
         if msg[0] == 0 {
             let mut rdr = std::io::Cursor::new(&msg[1..]);
             let uuid = rdr.read_u32::<LittleEndian>().unwrap();

@@ -25,7 +25,8 @@ extern crate toml;
 #[macro_use]
 extern crate serde_derive;
 
-use clap::{Arg, App};extern crate futures;
+use clap::{Arg, App};
+extern crate futures;
 
 use std::fs;
 
@@ -78,6 +79,8 @@ fn app() -> App<'static, 'static> {
         .author("Alex Rozgo")
         .arg(Arg::with_name("addr").short("a").long("address").help("Host to connect to address:port").takes_value(true))
         .arg(Arg::with_name("cfg").short("c").long("config").help("Path to config toml").takes_value(true))
+        .arg(Arg::with_name("mum").short("m").long("mumbleserver").help("murmur address address:port").takes_value(true))
+
 }
 
 fn main() {
@@ -92,7 +95,7 @@ fn main() {
         config_file.read_to_string(&mut config).unwrap();
         toml::from_str(&config).unwrap()
     };
-
+    //config.mumble.server = matches.value_of("mum").unwrap_or("127.0.0.1:8080");
     let access_key_id = &config.aws.access_key_id;
     let secret_access_key = &config.aws.secret_access_key;
     println!("access_key_id {}", access_key_id);
@@ -101,10 +104,12 @@ fn main() {
     let addr_str = matches.value_of("addr").unwrap_or("127.0.0.1:8080");
     let addr = addr_str.parse::<SocketAddr>().unwrap();
 
+    println!("Address: {}",addr_str);
+    
     let mut core = Core::new().unwrap();
     let handle = core.handle();
     let client = TcpStream::connect(&addr, &handle);
-    
+    println!("set vars");
     let app_logic = client.and_then(|socket| {
         let path = Path::new("mumble.pem");
         let mut ctx = SslContext::builder(SslMethod::tls()).unwrap();

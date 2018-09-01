@@ -6,7 +6,9 @@ COPY . .
 
 RUN cargo build --release
 RUN mkdir -p /build-out
+RUN mkdir -p /src
 run cp -r target/release /build-out/
+RUN cp -r /usr/src/mmo-mumble /src
 RUN ls -al /build-out/release/
 
 
@@ -14,7 +16,7 @@ RUN ls -al /build-out/release/
 FROM ubuntu:14.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get -y install ca-certificates libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get -y install ca-certificates libssl-dev nano iputils-ping && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build-out /
 COPY --from=build /usr/src/mmo-mumble/Config.toml /release/Config.toml
 # Setup OpenSSL

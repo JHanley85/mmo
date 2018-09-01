@@ -1,4 +1,5 @@
 [workspace]
 
-members = ["mmo-server", "mmo-client", "mmo-mumble"]
+#members = ["mmo-server", "mmo-client", "mmo-mumble"]
+members = ["mmo-server", "mmo-client"]
 
