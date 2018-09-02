@@ -33,4 +33,5 @@ RUN cat /etc/ld.so.conf
 RUN ldconfig
 RUN echo 'export LD_LIBRARY_PATH=/usr/local/lib' >> ~/.bash_profile && . ~/.bash_profile
 RUN openssl version
+EXPOSE 8080/tcp 8080/udp
 #CMD mmo-server -- --address 0.0.0.0:8080

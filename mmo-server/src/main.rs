@@ -37,10 +37,8 @@ impl UdpCodec for LineCodec {
 pub struct Client {
     pub instant: Instant,
 }
-
-fn main() {
-
-    let matches = App::new("mmo-server")
+fn app()-> App<'static, 'static> {
+    App::new("mmo-server")
         .version("0.1.0")
         .about("Simulates a slice of universe!")
         .author("Alex Rozgo")
@@ -54,8 +52,11 @@ fn main() {
             .long("expiration")
             .help("Connection expiration limit")
             .takes_value(true))
-        .get_matches();
+}
 
+
+fn main() {
+    let matches = app().get_matches();
     let addr = matches.value_of("addr").unwrap_or("127.0.0.1:8080");
     let addr = addr.parse::<SocketAddr>().unwrap();
     let exp = value_t!(matches, "exp", u64).unwrap_or(5);
@@ -64,45 +65,47 @@ fn main() {
     let handle = core.handle();
     let udp_local_addr: SocketAddr = addr;
     let server_socket = UdpSocket::bind(&udp_local_addr, &handle).unwrap();
-    println!("Listening on: {}", addr);
+   
     let (udp_socket_tx, udp_socket_rx) = server_socket.framed(LineCodec).split();
     let expiration = Duration::from_secs(exp);
     let clients = &mut HashMap::<SocketAddr, Client>::new();
     println!("Waiting for clients on: {}", addr);
     let listen_task = udp_socket_rx.fold((clients, udp_socket_tx), |(clients, udp_socket_tx), (client_socket, msg)| {
-        println!("listen_task");
-        if msg[0] == 0 {
-            let mut rdr = std::io::Cursor::new(&msg[1..]);
-            let uuid = rdr.read_u32::<LittleEndian>().unwrap();
-            println!("Client: {} UUID: {}", client_socket, uuid);
-        }
-
-        if !clients.contains_key(&client_socket) {
-            println!("Connected: {} Online: {}", client_socket, clients.len() + 1);
-        }
-        clients.insert(client_socket, Client { instant: Instant::now() });
-
-        let mut expired = Vec::new();
-        for (client_socket, client) in clients.iter() {
-            if client.instant.elapsed() > expiration {
-                expired.push(*client_socket);
+            if msg.len()==0 {
+               Error::new(ErrorKind::Other, "msg len");
             }
-        }
-        for client_socket in expired {
-            clients.remove(&client_socket);
-            println!("Expired: {} Online: {}", client_socket, clients.len());
-        }
+            if msg[0] == 0 { // this needs to be checked first. Port scanning panics.
+                // println!("msg[0]==0");
+                let mut rdr = std::io::Cursor::new(&msg[1..]);
+                let uuid = rdr.read_u32::<LittleEndian>().unwrap();
+                println!("Client: {} UUID: {}", client_socket, uuid);
+            }
+            if !clients.contains_key(&client_socket) {
+                println!("Connected: {} Online: {}", client_socket, clients.len() + 1);
+            }
+            clients.insert(client_socket, Client { instant: Instant::now() });
 
-        let client_sockets: Vec<_> = clients.keys()
-            .filter(|&&x| x != client_socket)
-            .map(|k| *k).collect();
-        stream::iter_ok::<_, ()>(client_sockets)
-        .fold(udp_socket_tx, move |udp_socket_tx, client_socket| {
-            udp_socket_tx.send((client_socket, msg.clone()))
-            .map_err(|_| ())
-        })
-        .map(|udp_socket_tx| (clients, udp_socket_tx))
-        .map_err(|_| Error::new(ErrorKind::Other, "broadcasting to clients"))
+            let mut expired = Vec::new();
+            for (client_socket, client) in clients.iter() {
+                if client.instant.elapsed() > expiration {
+                    expired.push(*client_socket);
+                }
+            }
+            for client_socket in expired {
+                clients.remove(&client_socket);
+                println!("Expired: {} Online: {}", client_socket, clients.len());
+            }
+
+            let client_sockets: Vec<_> = clients.keys()
+                .filter(|&&x| x != client_socket)
+                .map(|k| *k).collect();
+            stream::iter_ok::<_, ()>(client_sockets)
+            .fold(udp_socket_tx, move |udp_socket_tx, client_socket| {
+                udp_socket_tx.send((client_socket, msg.clone()))
+                .map_err(|_| ())
+            })
+            .map(|udp_socket_tx| (clients, udp_socket_tx))
+            .map_err(|_| Error::new(ErrorKind::Other, "broadcasting to clients"))
     });
 
     if let Err(err) = core.run(listen_task) {
