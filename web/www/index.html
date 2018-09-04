@@ -1,0 +1,52 @@
+<html>
+  <head>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css" rel="stylesheet" integrity="sha256-MfvZlkHCEqatNoGiOXveE8FIwMzZg4W85qfrfIFBfYc= sha512-dTfge/zgoMYpP7QbHy4gWMEGsbsdZeCXz7irItjcC3sPUFtf0kuFbDz/ixG7ArTxmDjLXDmezHubeNikyKGVyQ==" crossorigin="anonymous">
+    <title>Docker nginx Tutorial</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Redpill Server Container</h1>
+      <p>Welcome.</p>
+	  <ul>
+	  <li>This container (webserver, nginx), port 80.</li>
+	  <li>MMO-Server (rust) port ${MMO_SERVER_PORT}</li>
+	  <li>MMO-Client (rust) port ${MMO_CLIENT_PORT}</li>
+	  <li>MMO-Mumble (rust) port ${MMO_MUMBLE_PORT}</li>
+	  <li>MMO-Murmur (rust) port ${MURMUR_PORT}</li>
+	  <li></li>
+	  </ul>
+    </div>
+
+    <div>
+      <h1>Instructions</h1>
+      <p>
+https://github.com/JHanley85/mmo/tree/docker
+Dockerstation is a better gui for docker, if you want it.
+
+To get social venue to connect:
+Run `docker-machine ip` and the output is the IP of virtualbox- container.
+DynamicalSystems.ini:
+Server = ip:${MMO_SERVER_PORT}
+Mumble=ip:${MMO_MUMBLE_PORT}
+Audio is blank.
+
+Create a entry called docker to hold them, and set that as current environment.
+You can use mumble for windows to test murmur and connected mumble bots
+You don't have to. Docker-compose run will also tell you, just not with a gui.
+
+Eventually, we'll have nginx handling the udp load balancing, and everything else to make it solidified. But for now, it'll just host the docs.
+The procedure, will not change, even if the underlying parts do. Always docker-compose build, when downloading newest, docker-compose run to start it
+If you ever just hate life and want to burn it all to the ground `docker-machine stop default && docket-machine rm default` will destroy the VM. Rinse,repeat.
+This also applies for a separate computer on local network- docker-machine ip is NAT, so accessible on network. (edited)
+
+<h6>
+Download docker toolbox
+`docker-compose build && docker-compose run`
+`docker-machine ip`
+</h6>
+If you do not want docker to run in foreground, use `docker-compose start` instead of up.
+      </p>
+    </div>
+  </body>
+</html>
+

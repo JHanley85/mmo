@@ -1,128 +1,124 @@
-use std::thread;
-use std::io::Read;
-use std::io::Write;
-use std::net::TcpStream;
-use std::time::Duration;
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[macro_use]
+extern crate clap;
+extern crate futures;
+extern crate tokio_core;
+extern crate byteorder;
 
-extern crate rustc_serialize;
-extern crate docopt;
-use docopt::Docopt;
+use clap::{Arg, App};
 
-const USAGE: &'static str = "
-Echo benchmark.
+use std::io;
+use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::time::{Instant, Duration};
 
-Usage:
-  echo_bench [ -a <address> ] [ -l <length> ] [ -c <number> ] [ -t <duration> ]
-  echo_bench (-h | --help)
-  echo_bench --version
+use futures::{Future, stream, Stream, Sink};
+use tokio_core::net::{UdpSocket, UdpCodec};
+use tokio_core::reactor::Core;
 
-Options:
-  -h, --help                 Show this screen.
-  -a, --address <address>    Target echo server address.
-  -l, --length <length>      Test message length.
-  -t, --duration <duration>  Test duration in seconds.
-  -c, --number <number>      Test connection number.
-";
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
-#[derive(RustcDecodable,Debug)]
-struct Args {
-    flag_address: Option<String>,
-    flag_length: Option<usize>,
-    flag_duration: Option<u64>,
-    flag_number: Option<u32>,
+pub struct LineCodec;
+
+impl UdpCodec for LineCodec {
+    type In = (SocketAddr, Vec<u8>);
+    type Out = (SocketAddr, Vec<u8>);
+
+    fn decode(&mut self, addr: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
+        Ok((*addr, buf.to_vec()))
+    }
+
+    fn encode(&mut self, (addr, buf): Self::Out, into: &mut Vec<u8>) -> SocketAddr {
+        into.extend(buf);
+        addr
+    }
 }
 
-struct Count {
-    inb: u64,
-    outb: u64,
+pub struct Client {
+    pub instant: Instant,
 }
+fn app()-> App<'static, 'static> {
+    App::new("mmo-server")
+        .version("0.1.0")
+        .about("Simulates a slice of universe!")
+        .author("Alex Rozgo")
+        .arg(Arg::with_name("addr")
+            .short("a")
+            .long("address")
+            .help("Host to connect to address:port")
+            .takes_value(true))
+        .arg(Arg::with_name("exp")
+            .short("e")
+            .long("expiration")
+            .help("Connection expiration limit")
+            .takes_value(true))
+}
+
 
 fn main() {
-    let args: Args = Docopt::new(USAGE)
-        .and_then(|d| d.parse())
-        .and_then(|d| d.decode())
-        .unwrap_or_else(|e| e.exit());
+    let matches = app().get_matches();
+    let addr = matches.value_of("addr").unwrap_or("127.0.0.1:8080");
+    let addr = addr.parse::<SocketAddr>().unwrap();
+    let exp = value_t!(matches, "exp", u64).unwrap_or(5);
 
-    let length = args.flag_length.unwrap_or(26);
-    let address = args.flag_address.unwrap_or("127.0.0.1:12345".to_string());
-    let duration = args.flag_duration.unwrap_or(60);
-    let number = args.flag_number.unwrap_or(50);
-
-    let (tx, rx) = mpsc::channel();
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let control = Arc::downgrade(&stop);
-
-    for _ in 0..number {
-        let tx = tx.clone();
-        let address = address.clone();
-        let stop = stop.clone();
-        let length = length.clone();
-
-        thread::spawn(move || {
-            let mut sum = Count { inb: 0, outb: 0 };
-            let mut out_buf: Vec<u8> = vec![0; length];
-            out_buf[length - 1] = b'\n';
-            let mut in_buf: Vec<u8> = vec![0; length];
-            let mut stream = TcpStream::connect(&*address).unwrap();
-
-            loop {
-                if (*stop).load(Ordering::Relaxed) {
-                    break;
-                }
-
-                match stream.write_all(&out_buf) {
-                    Err(_) => {
-                        println!("Write error!");
-                        break;
-                    }
-                    Ok(_) => sum.outb += 1,
-                }
-
-                if (*stop).load(Ordering::Relaxed) {
-                    break;
-                }
-
-                match stream.read(&mut in_buf) {
-                    Err(_) => break,
-                    Ok(m) => {
-                        if m == 0 || m != length {
-                            println!("Read error!");
-                            break;
-                        }
-                    }
-                };
-                sum.inb += 1;
+    let mut core = Core::new().unwrap();
+    let handle = core.handle();
+    let udp_local_addr: SocketAddr = addr;
+    let server_socket = UdpSocket::bind(&udp_local_addr, &handle).unwrap();
+   
+    let (udp_socket_tx, udp_socket_rx) = server_socket.framed(LineCodec).split();
+    let expiration = Duration::from_secs(exp);
+    let clients = &mut HashMap::<SocketAddr, Client>::new();
+    println!("Waiting for clients on: {}", addr);
+    let listen_task = udp_socket_rx.fold((clients, udp_socket_tx), |(clients, udp_socket_tx), (client_socket, msg)| {
+            if msg.len()==0 {
+               Error::new(ErrorKind::Other, "msg len");
             }
-            tx.send(sum).unwrap();
-        });
-    }
+            
+            println!("{}: {:?} bytes", client_socket, msg.len());
+            if msg[0] == 0 { // this needs to be checked first. Port scanning panics.
+                // println!("msg[0]==0");
+                let mut rdr = std::io::Cursor::new(&msg[1..]);
+                let uuid = rdr.read_u32::<LittleEndian>().unwrap();
+                 println!("Client: {} UUID: {}", client_socket, uuid);
+                 join(client_socket,uuid);
+            }
+            if !clients.contains_key(&client_socket) {
+                println!("Connected: {} Online: {}", client_socket, clients.len() + 1);
+            }
+            clients.insert(client_socket, Client { instant: Instant::now() });
 
-    thread::sleep(Duration::from_secs(duration));
+            let mut expired = Vec::new();
+            for (client_socket, client) in clients.iter() {
+                if client.instant.elapsed() > expiration {
+                    expired.push(*client_socket);
+                }
+            }
+            for client_socket in expired {
+                clients.remove(&client_socket);
+                println!("Expired: {} Online: {}", client_socket, clients.len());
+            }
 
-    match control.upgrade() {
-        Some(stop) => (*stop).store(true, Ordering::Relaxed),
-        None => println!("Sorry, but all threads died already."),
-    }
+            let client_sockets: Vec<_> = clients.keys()
+              //  .filter(|&&x| x != client_socket)
+                .map(|k| *k).collect();
+            stream::iter_ok::<_, ()>(client_sockets)
+            .fold(udp_socket_tx, move |udp_socket_tx, client_socket| {
+            // println!("{}: {:?}", client_socket, msg.clone());
+                udp_socket_tx.send((client_socket, msg.clone()))
+                .map_err(|_| ())
+            })
+            .map(|udp_socket_tx| (clients, udp_socket_tx))
+            .map_err(|_| Error::new(ErrorKind::Other, "broadcasting to clients"))
+    });
 
-    let mut sum = Count { inb: 0, outb: 0 };
-    for _ in 0..number {
-        let c: Count = rx.recv().unwrap();
-        sum.inb += c.inb;
-        sum.outb += c.outb;
+    if let Err(err) = core.run(listen_task) {
+        println!("{}", err);
     }
-    println!("Benchmarking: {}", address);
-    println!("{} clients, running {} bytes, {} sec.",
-             number,
-             length,
-             duration);
-    println!("");
-    println!("Speed: {} request/sec, {} response/sec",
-             sum.outb / duration,
-             sum.inb / duration);
-    println!("Requests: {}", sum.outb);
-    println!("Responses: {}", sum.inb);
+}
+
+
+fn join(client_socket: SocketAddr,uuid: u32){
+    println!("Client: {} UUID: {}", client_socket, uuid);
+    println!("This is where we'd send initial state stuff.");
 }

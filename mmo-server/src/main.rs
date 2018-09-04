@@ -74,11 +74,14 @@ fn main() {
             if msg.len()==0 {
                Error::new(ErrorKind::Other, "msg len");
             }
+            
+            println!("{}: {:?} bytes", client_socket, msg.len());
             if msg[0] == 0 { // this needs to be checked first. Port scanning panics.
                 // println!("msg[0]==0");
                 let mut rdr = std::io::Cursor::new(&msg[1..]);
                 let uuid = rdr.read_u32::<LittleEndian>().unwrap();
-                println!("Client: {} UUID: {}", client_socket, uuid);
+                 println!("Client: {} UUID: {}", client_socket, uuid);
+                 join(client_socket,uuid);
             }
             if !clients.contains_key(&client_socket) {
                 println!("Connected: {} Online: {}", client_socket, clients.len() + 1);
@@ -97,10 +100,11 @@ fn main() {
             }
 
             let client_sockets: Vec<_> = clients.keys()
-                .filter(|&&x| x != client_socket)
+              //  .filter(|&&x| x != client_socket)
                 .map(|k| *k).collect();
             stream::iter_ok::<_, ()>(client_sockets)
             .fold(udp_socket_tx, move |udp_socket_tx, client_socket| {
+            // println!("{}: {:?}", client_socket, msg.clone());
                 udp_socket_tx.send((client_socket, msg.clone()))
                 .map_err(|_| ())
             })
@@ -111,4 +115,10 @@ fn main() {
     if let Err(err) = core.run(listen_task) {
         println!("{}", err);
     }
+}
+
+
+fn join(client_socket: SocketAddr,uuid: u32){
+    println!("Client: {} UUID: {}", client_socket, uuid);
+    println!("This is where we'd send initial state stuff.");
 }

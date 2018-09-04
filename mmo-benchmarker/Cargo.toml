@@ -2,7 +2,24 @@
 name = "mmo-benchmarker"
 version = "0.1.0"
 authors = ["Jack Hanley <jack.hanley@redpillvr.com>"]
+echo = "main.rs"
+connect= "connect.rs"
 
 [dependencies]
 docopt = "0.6"
 rustc-serialize = "0.3"
+futures-cpupool = "0.1"
+tokio-core = "0.1"
+tokio-io = "0.1"
+futures = "0.1"
+bytes = "0.4.9"
+byteorder = "1.0.0"
+clap = "2.24"
+
+[[bin]]
+name = "connect"
+path = "src/connect.rs"
+
+[[bin]]
+name = "echo"
+path = "src/main.rs"
