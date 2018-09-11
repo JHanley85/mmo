@@ -12,9 +12,13 @@ futures-cpupool = "0.1"
 tokio-core = "0.1"
 tokio-io = "0.1"
 futures = "0.1"
-bytes = "0.4.9"
-byteorder = "1.0.0"
-clap = "2.24"
+bytes = "0.4.10"
+byteorder = "1.2.6"
+clap = "2.32.0"
+time = "0.1"
+log = "0.4"
+uuid = { version = "0.6.5", features = ["v4","v5"] }
+rand = "0.3.15"
 
 [[bin]]
 name = "connect"

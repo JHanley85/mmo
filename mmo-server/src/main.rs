@@ -77,7 +77,6 @@ fn main() {
             
             println!("{}: {:?} bytes", client_socket, msg.len());
             if msg[0] == 0 { // this needs to be checked first. Port scanning panics.
-                // println!("msg[0]==0");
                 let mut rdr = std::io::Cursor::new(&msg[1..]);
                 let uuid = rdr.read_u32::<LittleEndian>().unwrap();
                  println!("Client: {} UUID: {}", client_socket, uuid);
