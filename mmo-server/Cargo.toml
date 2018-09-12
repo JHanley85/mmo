@@ -8,3 +8,7 @@ clap = "2.24"
 futures = "0.1"
 tokio-core = "0.1"
 byteorder = "1.0.0"
+time = "0.1"
+log = "0.4"
+uuid = { version = "0.6.5", features = ["v4","v5"] }
+rand = "0.3.15"

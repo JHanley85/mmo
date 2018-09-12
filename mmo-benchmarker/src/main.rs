@@ -26,7 +26,7 @@ use std::time::{Instant, Duration};
 use futures::{Future, stream, Stream, Sink};
 use tokio_core::net::{UdpSocket, UdpCodec};
 use tokio_core::reactor::Core;
-use byteorder::{LittleEndian, ReadBytesExt,WriteBytesExt,BigEndian};
+use byteorder::{LittleEndian, ReadBytesExt,WriteBytesExt};
 
 
 pub struct LineCodec;
@@ -85,7 +85,7 @@ impl UdpCodec for LineCodec {
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Client {
     pub instant: Instant,
-    pub UUID: u32,
+    pub guid: u32,
     pub addr: SocketAddr,
 }
 fn app()-> App<'static, 'static> {
@@ -122,13 +122,15 @@ fn main() {
     let expiration = Duration::from_secs(exp);
     let clients = &mut HashMap::<SocketAddr, Client>::new();
     
-    info!("Waiting for clients on: {}", addr);
+    println!("Waiting for clients on: {}", addr);
     let listen_task = udp_socket_rx.fold((clients, udp_socket_tx), | (clients, udp_socket_tx), (client_socket, msg)| {
+        println!(".");
             let mut msg_dup = msg.clone();
             let mut rep_condition:u8 = COND_SKIPOWNER;
              
             if msg.len()==0  {
                 rep_condition = COND_SKIP;
+                ()
 
             }else{
                 println!("IN [{}][{}]{} : {}  = {}",msg[0],msg[1],String::from_utf8_lossy(&[0u8]),String::from_utf8_lossy(&msg[0..]),msg.len());
@@ -138,16 +140,17 @@ fn main() {
                     // Special requests
                     let mut all_uuids: Vec<u32>=vec![];
 
-                    for (socket, client) in clients.iter() {
-                        all_uuids.push(client.UUID);
+                    for (_socket, client) in clients.iter() {
+                        all_uuids.push(client.guid);
                     }
 
-                    let (rep_condition,newmsg,newClient)= parse_message(all_uuids,client_socket,msg_dup.clone());
+                    let (new_condition,newmsg,new_client)= parse_message(all_uuids,client_socket,msg_dup.clone());
                     msg_dup = newmsg.clone();
-                    if newClient.UUID!=0 {
+                    rep_condition=new_condition;
+                    if new_client.guid!=0 {
                         if !clients.contains_key(&client_socket){
-                            clients.insert(client_socket,Client { instant:newClient.instant,UUID:newClient.UUID,addr:client_socket});
-                            println!("New client registered: {:?} : {}  Online: {:?}", client_socket,newClient.UUID ,clients.len() + 1);
+                            clients.insert(client_socket,Client { instant:new_client.instant,guid:new_client.guid,addr:client_socket});
+                            println!("New client registered: {:?} : {}  Online: {:?}", client_socket,new_client.guid ,clients.len() + 1);
                         }
                     }
                     
@@ -158,14 +161,20 @@ fn main() {
                         let mut rdr = std::io::Cursor::new(&msg[1..]);
                         let uid = rdr.read_u32::<LittleEndian>().unwrap();
                         rd_ping(client_socket,uid);
-                        let newClient : Client =Client{ instant:Instant::now(),UUID:uid,addr:client_socket};
-                        clients.insert(client_socket, newClient);
+                        let new_client : Client =Client{ instant:Instant::now(),guid:uid,addr:client_socket};
+                        clients.insert(client_socket, new_client);
+                        rep_condition= COND_SKIP;
+                }else if channel==MSG_AVATAR{
+
+                }else if channel == MSG_BYTE_ARRAY {
+
                 }
+
             }
+
             if !clients.contains_key(&client_socket){
                   ()
              }
-                rep_condition=COND_NONE;
 
             println!("Sender: {:?} Online: {:?}", client_socket, clients.len());
             // if !clients.contains_key(&client_socket){
@@ -201,11 +210,13 @@ fn main() {
                )
                 .map(|k| *k).collect();
 
-
+            if msg_dup.len()==0{
+                ()
+            }
+            println!("Out [{}]    [{}][{}]{} : {}  = {:?}",client_socket,msg_dup[0],msg_dup[1],String::from_utf8_lossy(&[0u8]),String::from_utf8_lossy(&msg_dup[0..]),msg);
             stream::iter_ok::<_, ()>(client_sockets)
             .fold(udp_socket_tx, move |udp_socket_tx, client_socket| {
                 
-                println!("Out [{}]    [{}][{}]{} : {}  = {}",client_socket,msg[0],msg[1],String::from_utf8_lossy(&[0u8]),String::from_utf8_lossy(&msg[0..]),msg.len());
                 udp_socket_tx.send((client_socket, msg_dup.clone()))
                 .map_err(|_| ())
             })
@@ -261,14 +272,7 @@ fn parse_message(clients: Vec<u32>,client_socket: SocketAddr,message: Vec<u8>)->
     let mut out_cond:u8=COND_NONE;
     let channel = message[0];
     let system:u8 = message[1];
-    let newclient:Client= Client { instant:Instant::now(),UUID: 0,addr:client_socket};
-    let route_register = SR_REGISTER;
-    let route_time = SR_TIME;
-    let route_cb = SR_CALLBACK_UPDATE;
-    let route_func = SR_FUNCREP;
-    let route_prop = SR_PROPERTYREP;
-    let route_ack = SR_ACK;
-
+    let newclient:Client= Client { instant:Instant::now(),guid: 0,addr:client_socket};
     if channel==MSG_WORLD {
             let mut rdr =std::io::Cursor::new(vec![message[2],message[3],message[4],message[5]]);
             let uid  = rdr.read_u32::<LittleEndian>().unwrap();
@@ -278,9 +282,9 @@ fn parse_message(clients: Vec<u32>,client_socket: SocketAddr,message: Vec<u8>)->
                 let newclient=register_client(clients,uid);
                 outmessage = vec![MSG_WORLD,SR_REGISTER];
                 let mut wtr = vec![];
-                wtr.write_u32::<LittleEndian>(newclient.UUID).unwrap();
+                wtr.write_u32::<LittleEndian>(newclient.guid).unwrap();
                 outmessage.append(&mut wtr);
-                println!("Recieved SR_REGISTER request : uuid :{}-> {}",uid,newclient.UUID);
+                println!("Recieved SR_REGISTER request : uuid :{}-> {}",uid,newclient.guid);
                 outmessage.append(&mut wtr);
             }else if system==SR_TIME {
                 outmessage = vec![MSG_WORLD];
@@ -304,7 +308,17 @@ fn parse_message(clients: Vec<u32>,client_socket: SocketAddr,message: Vec<u8>)->
                 out_cond=COND_NONE;
                 println!("Recieved SR_FUNCREP request : uuid :{}",uid);
             
-            } else{
+            }else   if system==SR_ACK {
+                outmessage = message;
+                out_cond=COND_NONE;
+                println!("Recieved SR_ACK request : uuid :{}",uid);
+            }else   if system==SR_RPC {
+                outmessage = message;
+                out_cond=COND_SKIP;
+                println!("Recieved SR_RPC request : uuid :{}",uid);
+            
+            
+            }  else{
                 outmessage = message;
                 out_cond=COND_NONE;
                 println!("Recieved _ request : uuid :{}",uid);
@@ -313,14 +327,14 @@ fn parse_message(clients: Vec<u32>,client_socket: SocketAddr,message: Vec<u8>)->
 
     return (out_cond,outmessage,newclient)
 }
-fn assign_uuid(clients: Vec<u32>,requested_uuid:u32) ->  Vec<u8>{
+fn assign_uuid(clients: Vec<u32>,_requested_uuid:u32) ->  Vec<u8>{
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    let mut x:u32 = requested_uuid;
+    let mut x:u32 = _requested_uuid;
     while  clients.contains(&x) || x==0 {
             let mut s = std::collections::hash_map::DefaultHasher::new();
             uuid::Uuid::new_v4().hash(&mut s);
-            let x=((s.finish() + 10000) as u16) as u32 | 0b00000000000000100000000000000000;
+            x=((s.finish() + 10000) as u16) as u32 | 0b00000000000000100000000000000000;
     }
     x= rng.gen::<u32>();
     let mut wtr = vec![];
@@ -332,5 +346,5 @@ fn register_client(clients: Vec<u32>,requested_uuid:u32)->Client {
     let mut rdr = std::io::Cursor::new(  assign_uuid(clients,requested_uuid));
     let uid: u32 = rdr.read_u32::<LittleEndian>().unwrap();
     let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-    return Client { instant:Instant::now(),UUID: uid,addr:socket}
+    return Client { instant:Instant::now(),guid: uid,addr:socket}
 }

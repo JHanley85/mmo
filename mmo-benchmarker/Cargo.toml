@@ -2,8 +2,6 @@
 name = "mmo-benchmarker"
 version = "0.1.0"
 authors = ["Jack Hanley <jack.hanley@redpillvr.com>"]
-echo = "main.rs"
-connect= "connect.rs"
 
 [dependencies]
 docopt = "0.6"
