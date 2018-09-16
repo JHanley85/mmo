@@ -18,6 +18,10 @@ extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate bytes;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+extern crate byteorder;
 
 use std::env;
 use std::io::{self, Read, Write};
@@ -27,8 +31,14 @@ use std::thread;
 use futures::sync::mpsc;
 use futures::{Sink, Future, Stream};
 use tokio_core::reactor::Core;
+use std::str;
+
+
+use std::io::Cursor;
+
 
 fn main() {
+     env_logger::init();
     // Determine if we're going to run in TCP or UDP mode
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     let tcp = match args.iter().position(|a| a == "--udp") {
@@ -202,7 +212,107 @@ mod udp {
     use futures::{Future, Stream};
     use tokio_core::net::{UdpCodec, UdpSocket};
     use tokio_core::reactor::Handle;
+    use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
+    
 
+const MSG_PING: u8=0;
+const MSG_WORLD: u8=1;
+const MSG_AVATAR: u8=2;
+const MSG_BYTE_ARRAY: u8=4;
+//Server requests
+
+const SR_TIME:u8=0;
+const SR_REGISTER:u8=1;
+const SR_ACK:u8=2;
+const SR_CALLBACK_UPDATE:u8=3;
+const SR_RPC:u8=4;
+const SR_PROPERTYREP:u8=5;
+const SR_FUNCREP:u8=6;
+const SR_JOINED:u8=7;
+const SR_CLOSED:u8=8;
+//message Relevancy
+const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
+const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
+const COND_SKIPOWNER:u8=2; // - This property send to every connection EXCEPT the owner
+const COND_SIMULATEDONLY:u8=3; // - This property will only send to simulated actors
+const COND_AUTONOMOUSONLY:u8=4; // - This property will only send to autonomous actors
+const COND_SIMULATEDORPHYSICS:u8=5; //- This property will send to simulated OR bRepPhysics actors
+const COND_INITIALOROWNER:u8=6; // - This property will send on the initial packet, or to the actors owner
+const COND_CUSTOM:u8=7; // - This property has no particular condition, but wants the ability to toggle on/off via SetCustomIsActiveOverride
+const COND_NONE:u8=8; // - This property will send to sender, and all listeners
+const COND_SKIP:u8=0;
+
+     pub fn register()->Vec<u8>{
+         info!("REGISTER send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_REGISTER;
+        out.append(&mut wtr);
+        return out;
+     }
+     fn sr_property()->Vec<u8>{
+         info!("PROPERTY send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_PROPERTYREP;
+        return out;
+     }
+     fn sr_time()->Vec<u8>{
+         info!("TIME send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_TIME;
+        return out;
+     }
+     fn sr_ack()->Vec<u8>{
+         info!("ACK send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_ACK;
+        return out;
+     }
+     fn sr_callback()->Vec<u8>{
+         info!("CALLBACK send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_CALLBACK_UPDATE;
+        return out;
+     }
+     fn sr_rpc()->Vec<u8>{
+         info!("RPC send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_RPC;
+        return out;
+     }
+     fn sr_func()->Vec<u8>{
+         info!("FUNC send");
+        let mut wtr:Vec<u8>=vec![0;6];
+        LittleEndian::write_u32(&mut wtr, 151u32);
+        let mut out = vec![0;6];
+        out[0] =MSG_WORLD;
+        out[1] =SR_FUNCREP;
+        return out;
+     }
+     fn sr_close()->Vec<u8>{
+         info!("CLOSE send");
+        let mut out = vec![0;2];
+        out[0] =MSG_WORLD;
+        out[1] =SR_CLOSED;
+        return out;
+     }
     pub fn connect(&addr: &SocketAddr,
                    handle: &Handle,
                    stdin: Box<Stream<Item = Vec<u8>, Error = io::Error>>)
@@ -223,11 +333,42 @@ mod udp {
         // discrete values. In this case we're working with *pairs* of socket
         // addresses and byte buffers.
         let (sink, stream) = udp.framed(Bytes).split();
+        let methods = vec![
+            String::from("register"),
+            String::from("property"),
+            String::from("ack"),
+            String::from("func"),
+            String::from("callback"),
+            String::from("time"),
+            String::from("rpc"),
+            String::from("close"),
+        ];
 
+        info!( "methods are {:?}",&methods[0..]);
         // All bytes from `stdin` will go to the `addr` specified in our
         // argument list. Like with TCP this is spawned concurrently
         handle.spawn(stdin.map(move |chunk| {
-            (addr, chunk)
+            let mut out:Vec<u8>= chunk[0..].to_vec();
+            let msg = String::from_utf8(out.clone().to_vec()).unwrap();
+            if msg.trim()==String::from("register"){
+                out=register();
+            }else if msg.trim()==String::from("property"){
+                out=sr_property();
+            }else if msg.trim()==String::from("ack"){
+                out=sr_ack();
+            }else if msg.trim()==String::from("func"){
+                out=sr_func();
+            }else if msg.trim()==String::from("callback"){
+                out=sr_callback();
+            }else if msg.trim()==String::from("time"){
+                out=sr_time();
+            }else if msg.trim()==String::from("rpc"){
+                out=sr_rpc();
+            }else if msg.trim()==String::from("close"){
+                out=sr_close();
+            }
+            info!("Sending out {} {}",out[0],out[1]);
+            return (addr, out.to_vec())
         }).forward(sink).then(|result| {
             if let Err(e) = result {
                 panic!("failed to write to socket: {}", e)
@@ -238,8 +379,12 @@ mod udp {
         // With UDP we could receive data from any source, so filter out
         // anything coming from a different address
         Box::new(stream.filter_map(move |(src, chunk)| {
-            if src == addr {
-                Some(chunk.into())
+          
+            if src == addr || true {
+                   let d:&[u8] = &chunk[0..];
+                   let s = String::from_utf8_lossy(d);
+                   println!("result: {}", s);
+                Some(d.into())
             } else {
                 None
             }
