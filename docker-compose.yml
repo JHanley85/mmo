@@ -2,12 +2,15 @@ version: '3.3'
 services:
   mmo-server:
     build: ./mmo-server/.
-    command: 'bash -c "cd /release/ && RUST_BACKTRACE=1 ./mmo-server --address  0.0.0.0:8080"'
+    command: 'bash -c "cd /release/ &&./mmo-server -a  0.0.0.0:8080"'
     ports:
       - '8010:8080/udp'
       - '8080'
     volumes:
       - './mmo-server:/opt/mmo-server/src'
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
     # deploy:
     #   replicas: 6
     #   update_config:
@@ -21,7 +24,7 @@ services:
          ipv4_address: 192.168.88.20
   mmo-server.1:
     build: ./mmo-server/.
-    command: 'bash -c "cd /release/ && RUST_BACKTRACE=1 ./mmo-server --address  0.0.0.0:8080"'
+    command: 'bash -c "cd /release/ && ./mmo-server --address  0.0.0.0:8080"'
     ports:
       - '8011:8080/udp'
       - '8080'
@@ -35,12 +38,15 @@ services:
     #   restart_policy:
     #     condition: on-failure
     #   endpoint_mode: vip
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
     networks:
       app_net:
          ipv4_address: 192.168.88.21
   mmo-server.2:
     build: ./mmo-server/.
-    command: 'bash -c "cd /release/ && RUST_BACKTRACE=1 ./mmo-server --address  0.0.0.0:8080"'
+    command: 'bash -c "cd /release/ && ./mmo-server --address  0.0.0.0:8080"'
     ports:
       - '8012:8080/udp'
       - '8080'
@@ -54,6 +60,9 @@ services:
     #   restart_policy:
     #     condition: on-failure
     #   endpoint_mode: vip
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
     networks:
       app_net:
          ipv4_address: 192.168.88.22

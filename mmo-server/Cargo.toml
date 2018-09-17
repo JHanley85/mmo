@@ -12,3 +12,4 @@ time = "0.1"
 log = "0.4"
 uuid = { version = "0.6.5", features = ["v4","v5"] }
 rand = "0.3.15"
+env_logger = "0.5.13"
