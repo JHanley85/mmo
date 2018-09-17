@@ -53,6 +53,8 @@ const SR_AUTHORITY:u8=7;
 const SR_STATE:u8=8;
 const SR_JOINED:u8=9;
 const SR_CLOSED:u8=10;
+const SR_SESSION_UPDATE:u8=11;
+const SR_PLAYER_STATE_UPDATE:u8=12;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -179,6 +181,7 @@ impl Router for Server{
             let mut wtr:Vec<u8>=vec![0;6];
             LittleEndian::write_u32(&mut wtr, *uid);
             msg.extend_from_slice(&wtr);
+            info!("CLOSE Message Event from {} -> {} ",sender,uid);
             self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
         }
        
@@ -301,7 +304,7 @@ impl Connections for Server{
             existing.push(*uid);   
          }
         for uid in existing{
-            if(x!=uid){
+            if x!=uid {
                  let mut msg = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;6];
                 LittleEndian::write_u32(&mut wtr, uid);
@@ -311,7 +314,7 @@ impl Connections for Server{
      
                 self.broadcast(&msg[0..],addr,COND_OWNERONLY);
             }else{
-                let mut msg = vec![MSG_WORLD,SR_JOINED];
+                let mut msg = vec![MSG_WORLD,SR_REGISTER];
                 let mut wtr:Vec<u8>=vec![0;6];
                 LittleEndian::write_u32(&mut wtr, uid);
 //                wtr = format!("{:?} MY connection",uid).into_bytes();
@@ -351,7 +354,7 @@ impl Future for Server {
               //  let amt = try_nb!(self.socket.send_to(&self.buf[..size], &peer));
                 let sr=self.parse_route(cop.clone(),peer);
                 if(!sr){
-                    info!("Echoed {} bytes to {}", size, peer);
+                    info!("Echoed [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
                     self.socket.send_to(&cop[0..],&peer);
                 }
                 // sr.what();

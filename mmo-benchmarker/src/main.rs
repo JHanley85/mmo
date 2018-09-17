@@ -311,7 +311,7 @@ impl Connections for Server{
      
                 self.broadcast(&msg[0..],addr,COND_OWNERONLY);
             }else{
-                let mut msg = vec![MSG_WORLD,SR_JOINED];
+                let mut msg = vec![MSG_WORLD,SR_REGISTER];
                 let mut wtr:Vec<u8>=vec![0;6];
                 LittleEndian::write_u32(&mut wtr, uid);
 //                wtr = format!("{:?} MY connection",uid).into_bytes();
@@ -331,8 +331,8 @@ impl Connections for Server{
         LittleEndian::write_u32(&mut wtr, id);
         msg.extend_from_slice(&wtr);
 //            msg = format!("{:?} MY connection",id).into_bytes();
-        self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
-        debug!("Sending {:?} to {}",msg,COND_SKIPOWNER);
+        //self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
+        //debug!("Sending {:?} to {}",msg,COND_SKIPOWNER);
         return true
     }
 }
