@@ -191,9 +191,10 @@ impl Router for Server{
         return true;
     }
     fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-        debug!("REGISTER Message Event from {}- {} bytes",sender,msg.len());
+          let s = String::from_utf8_lossy(&msg[6..]);
+        debug!("REGISTER Message Event from {}- {} bytes {}",sender,msg.len(),s);
         
-        self.add_connection(&msg[4..],sender);
+        self.add_connection(&msg[6..],sender);
         return true;
     }
     fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
@@ -301,7 +302,9 @@ impl Connections for Server{
             addr: addr,
             settings: msg.to_vec(),
         };
-        self.connections.insert(x,newClient);
+        if !self.connections.contains_key(&x){
+            self.connections.insert(x,newClient);
+        }
         debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
         //self.notify_new_connection(x);
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
@@ -316,24 +319,27 @@ impl Connections for Server{
         for client in clients{
             
             if x!=client.guid {
-                let mut msg = vec![MSG_WORLD,SR_JOINED];
-                let mut wtr:Vec<u8>=vec![0;6];
+                let mut out = vec![MSG_WORLD,SR_JOINED];
+                let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
 //                wtr = format!("{:?} New connection",uid).into_bytes();
-                msg.extend_from_slice(&wtr);
-                msg.extend_from_slice(&client.settings[0..]);
+                out.extend_from_slice(&wtr);
+                out.extend_from_slice(&client.settings[0..]);
                  debug!("sending connection: [{}]",x);
      
-                self.broadcast(&msg[0..],addr,COND_OWNERONLY);
+                self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }else{
-                let mut msg = vec![MSG_WORLD,SR_REGISTER];
-                let mut wtr:Vec<u8>=vec![0;6];
+                let mut out = vec![MSG_WORLD,SR_REGISTER];
+                let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
 //                wtr = format!("{:?} MY connection",uid).into_bytes();
-                msg.extend_from_slice(&wtr);
+                out.extend_from_slice(&wtr);
+                out.extend_from_slice(&client.settings[0..]); 
+                let s = String::from_utf8_lossy(&client.settings[0..]);
+                   println!("result: {} {}", s,out.len());
                  debug!("sending connection: [{}]",x);
      
-                self.broadcast(&msg[0..],addr,COND_OWNERONLY);
+                self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }
         }
         return true
@@ -419,11 +425,10 @@ fn main() {
     // Next we'll create a future to spawn (the one we defined above) and then
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
-    let mut server = Server{
+    l.run(Server{
         socket: socket,
+        connections:connections,
         buf: vec![0; 1024],
         to_send: None,
-        connections:connections
-    };
-    l.run(server).unwrap();
+       }).unwrap();
 }

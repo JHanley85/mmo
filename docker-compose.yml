@@ -12,6 +12,18 @@ services:
     networks:
       app_net:
         ipv4_address: 192.168.88.20
+  old-mmo-server:
+    build: ./mmo-server/.
+    command: 'bash -c "cd /release/ &&./old-mmo-server -a  0.0.0.0:8080"'
+    ports:
+      - '8080:8080/udp'
+      - '8080'
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+    networks:
+      app_net:
+        ipv4_address: 192.168.88.19
   mmo-server.1:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server --address  0.0.0.0:8080"'
