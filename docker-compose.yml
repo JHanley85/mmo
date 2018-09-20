@@ -6,74 +6,42 @@ services:
     ports:
       - '8010:8080/udp'
       - '8080'
-    volumes:
-      - './mmo-server:/opt/mmo-server/src'
     environment:
       - RUST_LOG=debug
       - RUST_BACKTRACE=1
-    # deploy:
-    #   replicas: 6
-    #   update_config:
-    #     parallelism: 2
-    #     delay: 10s
-    #   restart_policy:
-    #     condition: on-failure
-    #   endpoint_mode: vip
     networks:
       app_net:
-         ipv4_address: 192.168.88.20
+        ipv4_address: 192.168.88.20
   mmo-server.1:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server --address  0.0.0.0:8080"'
     ports:
       - '8011:8080/udp'
       - '8080'
-    volumes:
-      - './mmo-server:/opt/mmo-server/src'
-    # deploy:
-    #   replicas: 6
-    #   update_config:
-    #     parallelism: 2
-    #     delay: 10s
-    #   restart_policy:
-    #     condition: on-failure
-    #   endpoint_mode: vip
     environment:
       - RUST_LOG=debug
       - RUST_BACKTRACE=1
     networks:
       app_net:
-         ipv4_address: 192.168.88.21
+        ipv4_address: 192.168.88.21
   mmo-server.2:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server --address  0.0.0.0:8080"'
     ports:
       - '8012:8080/udp'
       - '8080'
-    volumes:
-      - './mmo-server:/opt/mmo-server/src'
-    # deploy:
-    #   replicas: 6
-    #   update_config:
-    #     parallelism: 2
-    #     delay: 10s
-    #   restart_policy:
-    #     condition: on-failure
-    #   endpoint_mode: vip
     environment:
       - RUST_LOG=debug
       - RUST_BACKTRACE=1
     networks:
       app_net:
-         ipv4_address: 192.168.88.22
+        ipv4_address: 192.168.88.22
   mmo-client:
     build: ./mmo-client/.
     command: 'bash -c "cd /release/ && ./mmo-client --address 0.0.0.0:8080"'
     ports:
       - '8081:8080/udp'
       - '8081:8080'
-    volumes:
-      - './mmo-client:/opt/mmo-client/src'
     networks:
       app_net:
         ipv4_address: 192.168.88.11
@@ -92,20 +60,14 @@ services:
     build: ./mmo-mumble/.
     ports:
       - '8082:8080/udp'
-    volumes:
-      - './mmo-mumble:/opt/mmo-mumble/src'
     networks:
       app_net:
         ipv4_address: 192.168.88.13
   web:
     build: ./web/.
     image: 'nginx:stable-alpine'
-    volumes:
-      - './web:/opt/web/src'
-    #   - type: bind
-    #     source: ./my/static/conf/
-    #     target: /etc/nginx/conf.d/
-    # command: '/bin/sh -c "envsubst \"`env | awk -F = ''{printf \" $$%s\", $$1}''`\" < /etc/nginx/conf.d/web.template > /etc/nginx/conf.d/default.conf && nginx -g ''daemon off;''"'
+    # volumes:
+    #   - './web:/opt/web/src'
     ports:
       - '80:80'
     environment:
@@ -115,11 +77,8 @@ services:
       - MMO_CLIENT_PORT=8081
       - MMO_MUMBLE_PORT=8082
       - MURMUR_PORT=64738
-    command: > 
-      /bin/sh -c '
-      envsubst < /usr/share/nginx/www/index.html > /usr/share/nginx/html/index.html && 
-      envsubst < /etc/nginx/conf.d/web.template > /etc/nginx/conf.d/default.conf && 
-      nginx -g "daemon off;"'
+    command: |
+      /bin/sh -c ' envsubst < /usr/share/nginx/www/index.html > /usr/share/nginx/html/index.html &&  envsubst < /etc/nginx/conf.d/web.template > /etc/nginx/conf.d/default.conf &&  nginx -g "daemon off;"'
     depends_on:
       - mmo-server
       - mmo-server.1
@@ -134,7 +93,5 @@ networks:
       driver: default
       config:
         - subnet: 192.168.88.0/24
-          # gateway: 192.168.88.1
-
-volumes: 
-  src:
+volumes:
+  src: null

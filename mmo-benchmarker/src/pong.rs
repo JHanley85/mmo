@@ -189,7 +189,8 @@ impl Router for Server{
     }
     fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
         debug!("REGISTER Message Event from {}- {} bytes",sender,msg.len());
-        self.add_connection(8u32,sender);
+        
+        self.add_connection(msg[4..],sender);
         return true;
     }
     fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
@@ -273,14 +274,15 @@ pub struct Client {
     pub instant: Instant,
     pub guid: u32,
     pub addr: SocketAddr,
+    pub settings:&[u8],
 }
 trait Connections{
 
-    fn add_connection(&mut self,id:u32, addr:SocketAddr)->bool;
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
 }
 impl Connections for Server{
-    fn add_connection(&mut self,id:u32, addr:SocketAddr)->bool{
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -294,6 +296,7 @@ impl Connections for Server{
             instant: Instant::now(),
             guid: x,
             addr: addr
+            settings: msg
         };
         self.connections.insert(x,newClient);
         debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());

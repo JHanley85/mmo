@@ -10,6 +10,9 @@
 //!     cargo run --example connect -- --udp 127.0.0.1:8080
 //!
 //! Each line you type in to the `nc` terminal should be echo'd back to you!
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -24,7 +27,7 @@ extern crate byteorder;
 extern crate time;
 extern crate rand;
 
-use std::{env, io};
+use std::{io};
 use std::net::SocketAddr;
 
 use futures::{Future, Poll};
@@ -98,7 +101,7 @@ impl Router for Server{
     fn get_sender_id(&mut self,sender:SocketAddr)->u32{
          let data_source : &Vec<u32>  =  &self.connections.iter()
         .filter(|&(k,v)| v.addr == sender).map(|(k,v)| *k).collect();
-        if(data_source.len() < 1){
+        if data_source.len() < 1 {
             return 0;
         }else{
             return data_source[0];
@@ -107,7 +110,7 @@ impl Router for Server{
     fn parse_route(&mut self,msg:Vec<u8>,peer:SocketAddr)->bool{
         let mut outmessage:Vec<u8> = msg.clone();
         let mut out_cond:u8=COND_NONE;
-        if(msg.len() < 2){
+        if msg.len() < 2 {
             warn!("Rec'd small msg from {} {:?}",peer,&msg[0..]);
             return true;
         }
@@ -123,42 +126,42 @@ impl Router for Server{
                     ()
                 }
                 SR_TIME=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.time_message(&msg[2..],peer);
                     }
                     ()
                 }
                 SR_CALLBACK_UPDATE=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.callback_message(&msg[2..],peer);
                     }()
                 }
                 SR_PROPERTYREP=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.property_message(&msg[2..],peer);
                     }
                     ()
                 }
                 SR_FUNCREP=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.function_message(&msg[2..],peer);
                     }
                     ()
                 }
                 SR_ACK=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.ack_message(&msg[2..],peer);
                     }
                     ()
                 }
                 SR_RPC=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.rpc_message(&msg[2..],peer);
                     }
                     ()
                 }
                 SR_CLOSED=>{
-                    if(senderid!=0){
+                    if senderid!=0 {
                         self.closed_connection(&msg[2..],peer);
                     }
                     ()
@@ -189,7 +192,8 @@ impl Router for Server{
     }
     fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
         debug!("REGISTER Message Event from {}- {} bytes",sender,msg.len());
-        self.add_connection(8u32,sender);
+        
+        self.add_connection(&msg[4..],sender);
         return true;
     }
     fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
@@ -246,7 +250,7 @@ impl Router for Server{
             COND_SKIPOWNER=>{
                 debug!("Skipping send to {}",sender);
                 for (id,client) in &self.connections{
-                    if(client.addr != sender){
+                    if client.addr != sender {
                         debug!("send to {}",client.addr);
 
                         self.socket.send_to(&msg[0..],&client.addr);
@@ -268,19 +272,20 @@ impl Router for Server{
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Debug,Clone)]
 pub struct Client {
     pub instant: Instant,
     pub guid: u32,
     pub addr: SocketAddr,
+    pub settings:Vec<u8>,
 }
 trait Connections{
 
-    fn add_connection(&mut self,id:u32, addr:SocketAddr)->bool;
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
 }
 impl Connections for Server{
-    fn add_connection(&mut self,id:u32, addr:SocketAddr)->bool{
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -293,30 +298,37 @@ impl Connections for Server{
        let newClient = Client{
             instant: Instant::now(),
             guid: x,
-            addr: addr
+            addr: addr,
+            settings: msg.to_vec(),
         };
         self.connections.insert(x,newClient);
         debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
-        self.notify_new_connection(x);
+        //self.notify_new_connection(x);
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
+        // let existing=&self.connections.values().collect();
         let mut existing:Vec<u32> = vec![];
-         for (uid,client) in self.connections.iter(){
+         let mut clients:Vec<Client> = vec![];
+
+        for (uid,client) in self.connections.iter(){
             existing.push(*uid);   
+            clients.push(client.clone());
          }
-        for uid in existing{
-            if x!=uid {
-                 let mut msg = vec![MSG_WORLD,SR_JOINED];
+        for client in clients{
+            
+            if x!=client.guid {
+                let mut msg = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;6];
-                LittleEndian::write_u32(&mut wtr, uid);
+                LittleEndian::write_u32(&mut wtr, client.guid);
 //                wtr = format!("{:?} New connection",uid).into_bytes();
                 msg.extend_from_slice(&wtr);
+                msg.extend_from_slice(&client.settings[0..]);
                  debug!("sending connection: [{}]",x);
      
                 self.broadcast(&msg[0..],addr,COND_OWNERONLY);
             }else{
                 let mut msg = vec![MSG_WORLD,SR_REGISTER];
                 let mut wtr:Vec<u8>=vec![0;6];
-                LittleEndian::write_u32(&mut wtr, uid);
+                LittleEndian::write_u32(&mut wtr, client.guid);
 //                wtr = format!("{:?} MY connection",uid).into_bytes();
                 msg.extend_from_slice(&wtr);
                  debug!("sending connection: [{}]",x);
@@ -353,7 +365,7 @@ impl Future for Server {
                 let mut cop = self.buf[..size].to_vec();
               //  let amt = try_nb!(self.socket.send_to(&self.buf[..size], &peer));
                 let sr=self.parse_route(cop.clone(),peer);
-                if(!sr){
+                if !sr {
                     info!("Echoed [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
                     self.socket.send_to(&cop[0..],&peer);
                 }

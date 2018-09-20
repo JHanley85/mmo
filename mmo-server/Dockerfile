@@ -1,6 +1,22 @@
 FROM rustlang/rust:nightly as build
 
-WORKDIR /usr/src/mmo-server
+#WORKDIR /usr/src/mmo/mmo-server
+
+RUN cargo install cargo-build-deps
+
+RUN cd /usr/src/ && USER=root cargo new --bin mmo
+WORKDIR /usr/src/mmo
+COPY Cargo.toml ./Cargo.toml
+RUN ls -al
+
+#RUN cp /tmp/Cargo.toml /usr/src/mmo/Cargo.toml
+# RUN cp /tmp/mmo-client/Cargo.toml /usr/src/mmo/mmo-client/Cargo.toml
+# RUN cp /tmp/mmo-benchmarker/Cargo.toml /usr/src/mmo/mmo-benchmarker/Cargo.toml
+# RUN cp /tmp/mmo-mumble/Cargo.toml /usr/src/mmo/mmo-mumble/Cargo.toml
+WORKDIR /usr/src/mmo
+
+RUN cargo build-deps --release
+
 COPY . .
 
 RUN cargo build --release
