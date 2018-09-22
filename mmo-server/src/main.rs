@@ -58,6 +58,7 @@ const SR_JOINED:u8=9;
 const SR_CLOSED:u8=10;
 const SR_SESSION_UPDATE:u8=11;
 const SR_PLAYER_STATE_UPDATE:u8=12;
+const SR_REGISTRATION_SPAWNED:u8=13;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -81,6 +82,7 @@ struct Server {
     buf: Vec<u8>,
     to_send: Option<(usize, SocketAddr)>,
     connections:HashMap<u32,Client>,
+    objects:HashMap<u32,Vec<u8>>
 }
 pub type ServerRouteResult = Result<Vec<u8>,ServerError>;
 trait Router{
@@ -97,6 +99,8 @@ trait Router{
     fn closed_connection(&mut self,msg:&[u8],peer:SocketAddr)->bool;
     fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8)->bool;
 }
+
+
 impl Router for Server{
     fn get_sender_id(&mut self,sender:SocketAddr)->u32{
          let data_source : &Vec<u32>  =  &self.connections.iter()
@@ -118,61 +122,94 @@ impl Router for Server{
         let system = msg[1];
         let senderid = self.get_sender_id(peer);
         debug!("C{} S{}, from {}",channel,system,senderid);
-        let mut isSR = channel==MSG_WORLD;
+        let mut is_server_request = channel==MSG_WORLD;
         if channel==MSG_WORLD {
             match system {
                 SR_REGISTER=>{
                     self.register_connection(&msg[2..],peer);
+                        is_server_request=true;
                     ()
                 }
                 SR_TIME=>{
                     if senderid!=0 {
                         self.time_message(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
                 SR_CALLBACK_UPDATE=>{
                     if senderid!=0 {
                         self.callback_message(&msg[2..],peer);
+                        is_server_request=true;
                     }()
                 }
                 SR_PROPERTYREP=>{
                     if senderid!=0 {
                         self.property_message(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
                 SR_FUNCREP=>{
                     if senderid!=0 {
                         self.function_message(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
                 SR_ACK=>{
                     if senderid!=0 {
                         self.ack_message(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
                 SR_RPC=>{
                     if senderid!=0 {
                         self.rpc_message(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
                 SR_CLOSED=>{
                     if senderid!=0 {
                         self.closed_connection(&msg[2..],peer);
+                        is_server_request=true;
                     }
                     ()
                 }
+                SR_REGISTRATION_SPAWNED=>{
+                    if senderid!=0 {
+                        self.register_object(&msg[2..],peer);
+                        is_server_request=true;
+                    }
+                    ()
+                }
+                SR_STATE=>{
+                        is_server_request=true;
+                    ()
+                }
+                SR_SESSION_UPDATE=>{
+                        is_server_request=true;
+                    ()
+                }
+                SR_AUTHORITY=>{
+                        is_server_request=true;
+                    ()
+                }
+                SR_PLAYER_STATE_UPDATE=>{
+                        is_server_request=true;
+                    ()
+                }
                 _=>{
-                    isSR=false;
+                    is_server_request=false;
                     ()
                 }
             }
+        }else if channel==MSG_AVATAR || channel==MSG_PING || channel==MSG_BYTE_ARRAY{
+            is_server_request=false;
         }
-        return isSR;
+        return is_server_request;
     }
     fn closed_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
         debug!("CLOSE Message Event from {}- {} bytes",sender,msg.len());
@@ -181,7 +218,7 @@ impl Router for Server{
         for uid in data_source.iter(){
             &self.connections.remove(uid);
             let mut msg = vec![MSG_WORLD,SR_CLOSED];
-            let mut wtr:Vec<u8>=vec![0;6];
+            let mut wtr:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut wtr, *uid);
             msg.extend_from_slice(&wtr);
             info!("CLOSE Message Event from {} -> {} ",sender,uid);
@@ -191,10 +228,10 @@ impl Router for Server{
         return true;
     }
     fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-          let s = String::from_utf8_lossy(&msg[6..]);
+          let s = String::from_utf8_lossy(&msg[4..]);
         debug!("REGISTER Message Event from {}- {} bytes {}",sender,msg.len(),s);
         
-        self.add_connection(&msg[6..],sender);
+        self.add_connection(&msg[4..],sender);
         return true;
     }
     fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
@@ -243,9 +280,20 @@ impl Router for Server{
 
     fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8)->bool{
         info!("Connections: {}",&self.connections.len());
-        match rep_condition{
+        let mut cond = rep_condition;
+        if rep_condition==COND_INITIALONLY || 
+            rep_condition==COND_SIMULATEDONLY || 
+            rep_condition==COND_CUSTOM ||
+            rep_condition==COND_INITIALOROWNER ||
+            rep_condition==COND_AUTONOMOUSONLY ||
+            rep_condition==COND_SIMULATEDORPHYSICS ||
+            rep_condition==COND_SKIP ||
+            rep_condition==COND_SKIPOWNER{
+                cond=COND_NONE;
+            }
+        match cond{
             COND_OWNERONLY=>{
-                    self.socket.send_to(&msg[0..],&sender);
+                    drop(self.socket.send_to(&msg[0..],&sender));
                 (true)
             }
             COND_SKIPOWNER=>{
@@ -254,7 +302,7 @@ impl Router for Server{
                     if client.addr != sender {
                         debug!("send to {}",client.addr);
 
-                        self.socket.send_to(&msg[0..],&client.addr);
+                        drop(self.socket.send_to(&msg[0..],&client.addr));
                     }
                 }
                 (true)
@@ -262,7 +310,7 @@ impl Router for Server{
             }
             COND_NONE=>{
                 for (id,client) in &self.connections{
-                    self.socket.send_to(&msg[0..],&client.addr);
+                    drop(self.socket.send_to(&msg[0..],&client.addr));
                 }
                 (true)
             }
@@ -281,34 +329,35 @@ pub struct Client {
     pub settings:Vec<u8>,
 }
 trait Connections{
-
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
+}
+trait Objects{
+    fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn notify_registered_object(&mut self,id:u32)->bool;
 }
 impl Connections for Server{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let mut x = rng.gen::<u32>();
-    for (uid,client) in self.connections.iter(){
-            if client.addr==addr{
-                x=client.guid;
-            }   
-    }
-       let newClient = Client{
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let mut x = rng.gen::<u32>();
+        for (uid,client) in self.connections.iter(){
+                if client.addr==addr{
+                    x=client.guid;
+                }   
+        }
+       let new_client = Client{
             instant: Instant::now(),
             guid: x,
             addr: addr,
             settings: msg.to_vec(),
         };
         if !self.connections.contains_key(&x){
-            self.connections.insert(x,newClient);
+            self.connections.insert(x,new_client);
         }
         debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
-        //self.notify_new_connection(x);
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
-        // let existing=&self.connections.values().collect();
         let mut existing:Vec<u32> = vec![];
          let mut clients:Vec<Client> = vec![];
 
@@ -322,7 +371,6 @@ impl Connections for Server{
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
-//                wtr = format!("{:?} New connection",uid).into_bytes();
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&client.settings[0..]);
                  debug!("sending connection: [{}]",x);
@@ -332,11 +380,10 @@ impl Connections for Server{
                 let mut out = vec![MSG_WORLD,SR_REGISTER];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
-//                wtr = format!("{:?} MY connection",uid).into_bytes();
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&client.settings[0..]); 
                 let s = String::from_utf8_lossy(&client.settings[0..]);
-                   println!("result: {} {}", s,out.len());
+                   println!("result: {} {}", s,&client.settings[0..].len());
                  debug!("sending connection: [{}]",x);
      
                 self.broadcast(&out[0..],addr,COND_OWNERONLY);
@@ -348,13 +395,27 @@ impl Connections for Server{
     fn notify_new_connection(&mut self,id:u32)->bool{
         let addr=self.connections[&id].addr;
         let mut msg = vec![MSG_WORLD,SR_JOINED];
-        let mut wtr:Vec<u8>=vec![0;6];
+        let mut wtr:Vec<u8>=vec![0;4];
         LittleEndian::write_u32(&mut wtr, id);
         msg.extend_from_slice(&wtr);
-//            msg = format!("{:?} MY connection",id).into_bytes();
         self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
         debug!("Sending {:?} to {}",msg,COND_SKIPOWNER);
         return true
+    }
+}
+impl Objects for Server{
+     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+         let mut uid:u32 =LittleEndian::read_u32(&mut &msg[0..3]);
+         let mut oid:u32 =LittleEndian::read_u32(&mut &msg[4..7]);
+         let mut payload:Vec<u8>=msg[8..].to_vec();
+        debug!("New ID registration: {},{},{:?}",uid,oid,payload);
+        self.objects.insert(oid,payload);
+        self.notify_registered_object(oid);
+         return false;
+
+     }
+    fn notify_registered_object(&mut self,id:u32)->bool{
+        return false;
     }
 }
 
@@ -373,7 +434,7 @@ impl Future for Server {
                 let sr=self.parse_route(cop.clone(),peer);
                 if !sr {
                     info!("Echoed [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
-                    self.socket.send_to(&cop[0..],&peer);
+                    drop(self.socket.send_to(&cop[0..],&peer));
                 }
                 // sr.what();
                 // let outb:&[u8]=Ok(sr).unwrap();
@@ -425,9 +486,11 @@ fn main() {
     // Next we'll create a future to spawn (the one we defined above) and then
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
+    let mut objects=HashMap::<u32,Vec<u8>>::new();
     l.run(Server{
         socket: socket,
         connections:connections,
+        objects:objects,
         buf: vec![0; 1024],
         to_send: None,
        }).unwrap();
