@@ -2,6 +2,7 @@
 name = "mmo-benchmarker"
 version = "0.1.0"
 authors = ["Jack Hanley <jack.hanley@redpillvr.com>"]
+autobins=false 
 
 [dependencies]
 docopt = "0.6"
@@ -23,12 +24,3 @@ env_logger = "0.5.13"
 [[bin]]
 name = "connect"
 path = "src/connect.rs"
-
-[[bin]]
-name = "echo"
-path = "src/main.rs"
-
-
-[[bin]]
-name ="pong"
-path = "src/pong.rs"

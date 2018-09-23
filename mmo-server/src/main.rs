@@ -36,7 +36,7 @@ use tokio_core::reactor::Core;
 
 use std::time::{Instant, Duration};
 use std::collections::HashMap;
-
+use std::hash::{Hash, Hasher};
 use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
 
 const MSG_PING: u8=0;
@@ -59,6 +59,7 @@ const SR_CLOSED:u8=10;
 const SR_SESSION_UPDATE:u8=11;
 const SR_PLAYER_STATE_UPDATE:u8=12;
 const SR_REGISTRATION_SPAWNED:u8=13;
+const SR_REGISTER_PROPERTY:u8=14;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -77,12 +78,20 @@ pub enum ServerError {
     Variant1,
     Variant2,
 }
+
+#[derive(Eq, PartialEq, Debug,Clone)]
+struct ObjectRep{
+    oid:u32,
+    parent_id:u32,
+    bytes:Vec<u8>,
+}
+
 struct Server {
     socket: UdpSocket,
     buf: Vec<u8>,
     to_send: Option<(usize, SocketAddr)>,
     connections:HashMap<u32,Client>,
-    objects:HashMap<u32,Vec<u8>>
+    objects:HashMap<u32,ObjectRep>
 }
 pub type ServerRouteResult = Result<Vec<u8>,ServerError>;
 trait Router{
@@ -199,6 +208,11 @@ impl Router for Server{
                 }
                 SR_PLAYER_STATE_UPDATE=>{
                         is_server_request=true;
+                    ()
+                }
+                SR_REGISTER_PROPERTY=>{
+                    is_server_request=true;
+                    self.register_property(&msg[2..],peer);
                     ()
                 }
                 _=>{
@@ -327,7 +341,9 @@ pub struct Client {
     pub guid: u32,
     pub addr: SocketAddr,
     pub settings:Vec<u8>,
+    pub last_message:Instant
 }
+
 trait Connections{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
@@ -335,6 +351,7 @@ trait Connections{
 trait Objects{
     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn notify_registered_object(&mut self,id:u32)->bool;
+    fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool;
 }
 impl Connections for Server{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
@@ -352,6 +369,7 @@ impl Connections for Server{
             guid: x,
             addr: addr,
             settings: msg.to_vec(),
+            last_message:Instant::now(),
         };
         if !self.connections.contains_key(&x){
             self.connections.insert(x,new_client);
@@ -404,14 +422,90 @@ impl Connections for Server{
     }
 }
 impl Objects for Server{
+     fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+        use rand::Rng;
+        debug!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
+        let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
+        debug!("uid {}",sender);
+        let mut oid:u32 =LittleEndian::read_u32(&mut &msg[4..8]);
+        debug!("oid {}",oid);
+        let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]);
+        debug!("pid {}",pid);
+        let mut payload = &msg[12..];
+        debug!("payload {:?}",&payload[0..]);
+        let mut rng = rand::thread_rng();
+        let mut new_oid = rng.gen::<u32>();
+
+        let mut client = self.connections.values().cloned().filter(|ref c| c.addr==addr).next().clone().unwrap();
+        let new_prop = ObjectRep{
+            parent_id: oid,
+            bytes:payload.to_vec(),
+            oid:new_oid,
+        };
+        self.objects.insert(new_oid,new_prop);
+         
+        let mut out_sender = vec![MSG_WORLD,SR_REGISTER_PROPERTY];
+        //sender uid
+        let mut uid:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut uid, client.guid);
+        out_sender.extend_from_slice(&uid);
+        //object id
+        let mut orig_id:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut orig_id, oid);
+        out_sender.extend_from_slice(&orig_id);
+        // new property id
+        let mut new_id:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut new_id, new_oid);
+        out_sender.extend_from_slice(&new_id);
+        // property payload - being name.
+        out_sender.extend_from_slice(&payload[0..]);
+        self.broadcast(&out_sender[0..],addr,COND_NONE);
+
+        return true;
+     }
      fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool{
-         let mut uid:u32 =LittleEndian::read_u32(&mut &msg[0..3]);
-         let mut oid:u32 =LittleEndian::read_u32(&mut &msg[4..7]);
-         let mut payload:Vec<u8>=msg[8..].to_vec();
-        debug!("New ID registration: {},{},{:?}",uid,oid,payload);
-        self.objects.insert(oid,payload);
+        use rand::Rng;
+        debug!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?}",addr,&msg[0 .. 3].len(),&msg);
+
+        let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
+        debug!("uid {}",uid);
+        let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
+        debug!("oid {}",oid);
+        let mut rng = rand::thread_rng();
+        let mut new_oid = rng.gen::<u32>();
+        debug!("new oid {}",new_oid);
+        let mut payload:Vec<u8>=msg[8..].to_vec();
+        debug!("payload {:?}",payload);
+        let mut new_object = ObjectRep{
+            parent_id:0,
+            oid:new_oid,
+            bytes:payload.clone()
+        };
+        self.objects.insert(new_oid,new_object);
+
+
         self.notify_registered_object(oid);
-         return false;
+        let mut clients=self.connections.values().cloned()
+            .filter(|ref v| v.addr==addr)
+            .next().clone();
+        let client = clients.unwrap();
+       
+            let mut out_sender = vec![MSG_WORLD,SR_REGISTRATION_SPAWNED];
+            let mut uid:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut uid, client.guid);
+            out_sender.extend_from_slice(&uid);
+            let mut orig_id:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut orig_id, oid);
+            out_sender.extend_from_slice(&orig_id);
+            let mut new_id:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut new_id, new_oid);
+            out_sender.extend_from_slice(&new_id);
+            out_sender.extend_from_slice(&payload[0..]);
+            debug!("Sending {:?}",&out_sender[0..]);
+            self.broadcast(&out_sender[0..],addr,COND_NONE);
+
+
+         return true;
 
      }
     fn notify_registered_object(&mut self,id:u32)->bool{
@@ -486,7 +580,7 @@ fn main() {
     // Next we'll create a future to spawn (the one we defined above) and then
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
-    let mut objects=HashMap::<u32,Vec<u8>>::new();
+    let mut objects=HashMap::<u32,ObjectRep>::new();
     l.run(Server{
         socket: socket,
         connections:connections,
