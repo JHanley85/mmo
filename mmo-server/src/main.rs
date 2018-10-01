@@ -60,6 +60,8 @@ const SR_SESSION_UPDATE:u8=11;
 const SR_PLAYER_STATE_UPDATE:u8=12;
 const SR_REGISTRATION_SPAWNED:u8=13;
 const SR_REGISTER_PROPERTY:u8=14;
+const SR_REQUEST_USERSTATE:u8=15;
+const SR_REQUEST_OBJECTSTATE:u8=16;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -154,7 +156,7 @@ impl Router for Server{
                 }
                 SR_PROPERTYREP=>{
                     if senderid!=0 {
-                        self.property_message(&msg[2..],peer);
+                        self.property_message(&msg[0..],peer);
                         is_server_request=true;
                     }
                     ()
@@ -213,6 +215,16 @@ impl Router for Server{
                 SR_REGISTER_PROPERTY=>{
                     is_server_request=true;
                     self.register_property(&msg[2..],peer);
+                    ()
+                }
+                SR_REQUEST_USERSTATE=>{
+                    is_server_request=true;
+                    self.userstate(&msg[2..],peer);
+                    ()
+                }
+                SR_REQUEST_OBJECTSTATE=>{
+                    is_server_request=true;
+                    self.objectstate(&msg[2..],peer);
                     ()
                 }
                 _=>{
@@ -347,11 +359,13 @@ pub struct Client {
 trait Connections{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
+    fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
 }
 trait Objects{
     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn notify_registered_object(&mut self,id:u32)->bool;
     fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
 }
 impl Connections for Server{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
@@ -420,21 +434,27 @@ impl Connections for Server{
         debug!("Sending {:?} to {}",msg,COND_SKIPOWNER);
         return true
     }
+    fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+        let mut oid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
+        let object:Client= self.connections[&oid].clone();
+        self.broadcast(&object.settings[0..],addr,COND_OWNERONLY);
+        return true;
+    }
 }
 impl Objects for Server{
      fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
         use rand::Rng;
         debug!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
         let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
-        debug!("uid {}",sender);
         let mut oid:u32 =LittleEndian::read_u32(&mut &msg[4..8]);
-        debug!("oid {}",oid);
         let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]);
-        debug!("pid {}",pid);
         let mut payload = &msg[12..];
-        debug!("payload {:?}",&payload[0..]);
         let mut rng = rand::thread_rng();
         let mut new_oid = rng.gen::<u32>();
+        while self.objects.contains_key(&new_oid){
+            new_oid = rng.gen::<u32>();
+        }
+        debug!("[{}] {} {}=>{} payload {:?}",sender, oid,pid,new_oid, &payload[0..]);
 
         let mut client = self.connections.values().cloned().filter(|ref c| c.addr==addr).next().clone().unwrap();
         let new_prop = ObjectRep{
@@ -468,22 +488,21 @@ impl Objects for Server{
         debug!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?}",addr,&msg[0 .. 3].len(),&msg);
 
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
-        debug!("uid {}",uid);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
-        debug!("oid {}",oid);
         let mut rng = rand::thread_rng();
         let mut new_oid = rng.gen::<u32>();
-        debug!("new oid {}",new_oid);
+        while self.objects.contains_key(&new_oid){
+            new_oid = rng.gen::<u32>();
+        }
         let mut payload:Vec<u8>=msg[8..].to_vec();
-        debug!("payload {:?}",payload);
+        debug!("[{}] {}=>{} payload {:?}",uid, oid,new_oid, &payload[0..]);
+ 
         let mut new_object = ObjectRep{
             parent_id:0,
             oid:new_oid,
             bytes:payload.clone()
         };
         self.objects.insert(new_oid,new_object);
-
-
         self.notify_registered_object(oid);
         let mut clients=self.connections.values().cloned()
             .filter(|ref v| v.addr==addr)
@@ -511,6 +530,13 @@ impl Objects for Server{
     fn notify_registered_object(&mut self,id:u32)->bool{
         return false;
     }
+     fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+        let mut oid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
+        let object: ObjectRep = self.objects[&oid].clone();
+
+        self.broadcast(&object.bytes[0..],addr,COND_OWNERONLY);
+        return true;
+     }
 }
 
 impl Future for Server {
@@ -536,7 +562,7 @@ impl Future for Server {
 
                 self.to_send = None;
             }
-
+            info!("Connections: {}",self.connections.len());
             // If we're here then `to_send` is `None`, so we take a look for the
             // next message we're going to echo back.
             self.to_send = Some(try_nb!(self.socket.recv_from(&mut self.buf)));
