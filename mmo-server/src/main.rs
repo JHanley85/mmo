@@ -280,7 +280,7 @@ impl Router for Server{
     }
     fn property_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
         debug!("PROPERTY Message Event from {}- {} bytes",sender,msg.len());
-        self.broadcast(&msg[0..],sender,COND_NONE);
+        self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
         return true;
 
     }
@@ -335,10 +335,10 @@ impl Router for Server{
                 (true)
             }
             COND_SKIPOWNER=>{
-                debug!("Skipping send to {}",sender);
+                info!("Skipping send to {}",sender);
                 for (id,client) in &self.connections{
                     if client.addr != sender {
-                        debug!("send to {}",client.addr);
+                        info!("send to {}",client.addr);
 
                         drop(self.socket.send_to(&msg[0..],&client.addr));
                     }
@@ -573,7 +573,7 @@ impl Objects for Server{
 
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let s = String::from_utf8_lossy(&msg[0..]);
-        info!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?} - {:?}",addr,uid,&msg,s);
+        debug!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?} - {:?}",addr,uid,&msg,s);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         let mut rng = rand::thread_rng();
         let mut new_oid = rng.gen::<u32>();
@@ -768,7 +768,7 @@ fn main() {
         socket: socket,
         connections:connections,
         objects:objects,
-        buf: vec![0; 1024],
+        buf: vec![0; 65507],
         to_send: None,
        }).unwrap();
 }
