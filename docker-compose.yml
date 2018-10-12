@@ -1,17 +1,19 @@
 version: '3.3'
 services:
   hamachi:
-      image: gfjardim/hamachi
-      container_name: hamachi
-
-      network_mode: "host"
-      volumes:
-          - /etc/localtime:/etc/localtime:ro
-          - $HOME/.config/hamachi:/config
-      restart: always
-      environment:
-          - ACCOUNT="jack.hanley@redpillvr.com"
-      privileged: true
+    image: gfjardim/hamachi
+    container_name: hamachi
+    network_mode: host
+    volumes:
+      - '/etc/localtime:/etc/localtime:ro'
+      - '$HOME/.config/hamachi:/config'
+    restart: always
+    environment:
+      - ACCOUNT="jack.hanley@redpillvr.com"
+      - NETWORK="redpillvr-dev-docker"
+      - PASS=""
+    privileged: true
+    
   mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -26,7 +28,6 @@ services:
     networks:
       app_net:
         ipv4_address: 192.168.88.20
-      
   old-mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./old-mmo-server -a  0.0.0.0:8080"'
@@ -112,9 +113,6 @@ services:
       - mmo-server.2
       - murmur
     network_mode: host
-    # networks:
-    #   app_net:
-    #     ipv4_address: 192.168.88.14
 networks:
   app_net:
     ipam:

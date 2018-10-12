@@ -63,7 +63,8 @@ const SR_REGISTER_PROPERTY:u8=14;
 const SR_REQUEST_USERSTATE:u8=15;
 const SR_REQUEST_OBJECTSTATE:u8=16;
 const SR_REQUEST_PROPERTYSTATE:u8=17;
-
+const SR_REJOIN:u8=18;
+const SR_UNREGISTER_OBJECT:u8=19;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -101,7 +102,7 @@ struct Server {
 }
 pub type ServerRouteResult = Result<Vec<u8>,ServerError>;
 trait Router{
-     fn get_sender_id(&mut self,sender:SocketAddr)->u32;
+    fn get_sender_id(&mut self,sender:SocketAddr)->u32;
     fn parse_route(&mut self,msg:Vec<u8>,addr:SocketAddr)->bool;
     fn register_connection(&mut self,msg:&[u8],peer:SocketAddr)->bool;
     fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
@@ -266,7 +267,7 @@ impl Router for Server{
         return true;
     }
     fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-          let s = String::from_utf8_lossy(&msg[4..]);
+        let s = String::from_utf8_lossy(&msg[4..]);
         debug!("REGISTER Message Event from {}- {} bytes {}",sender,msg.len(),s);
         
         self.add_connection(&msg[4..],sender);
@@ -382,7 +383,7 @@ impl Router for Server{
 		let mut stale: Vec<u32>=Vec::<u32>::new();
 
 		for (id,client) in &self.connections{
-			if client.instant.elapsed().as_secs() > 200{
+			if client.instant.elapsed().as_secs() > 60{
 				stale.push(*id);
 			}
 		}
@@ -411,6 +412,7 @@ trait Connections{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
     fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn rejoin(&mut self, client:Client)->bool;
 }
 trait Objects{
     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
@@ -421,44 +423,60 @@ trait Objects{
     fn propertystate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
 }
 impl Connections for Server{
+    fn rejoin(&mut self,client:Client)->bool{
+        info!("Client rejoining: {} {}",client.guid,client.addr);
+        let mut out = vec![MSG_WORLD,SR_REJOIN];
+        let mut wtr:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut wtr, client.guid);
+        out.extend_from_slice(&wtr);
+        out.extend_from_slice(&client.settings[0..]); 
+        let s = String::from_utf8_lossy(&client.settings[0..]);
+        println!("result: {} {}", s,&client.settings[0..].len());
+        debug!("sending reregisgtered connection: [{}]",client.guid);
+        self.broadcast(&out[0..],client.addr,COND_OWNERONLY);
+        return true;
+    }
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let mut x = rng.gen::<u32>();
+        let mut preexisting = false;
         for (uid,client) in self.connections.iter(){
                 if client.addr==addr{
                     x=client.guid;
                 }   
         }
-       let new_client = Client{
+        let new_client = Client{
             instant: Instant::now(),
             guid: x,
             addr: addr,
             settings: msg.to_vec(),
             last_message:Instant::now(),
         };
+        
         if !self.connections.contains_key(&x){
             self.connections.insert(x,new_client);
+        }else{
+            self.rejoin(new_client);
         }
         debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
         let mut existing:Vec<u32> = vec![];
-         let mut clients:Vec<Client> = vec![];
+        let mut clients:Vec<Client> = vec![];
 
         for (uid,client) in self.connections.iter(){
             existing.push(*uid);   
             clients.push(client.clone());
          }
         for client in clients{
-            
             if x!=client.guid {
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&client.settings[0..]);
-                 debug!("sending join connection: [{}] to {} @ {}", x, client.guid, client.addr);
+                debug!("sending join connection: [{}] to {} @ {}", x, client.guid, client.addr);
                 self.broadcast(&out[0..],addr,COND_SKIPOWNER);
             }else{
                 let mut out = vec![MSG_WORLD,SR_REGISTER];
@@ -467,9 +485,8 @@ impl Connections for Server{
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&client.settings[0..]); 
                 let s = String::from_utf8_lossy(&client.settings[0..]);
-                   println!("result: {} {}", s,&client.settings[0..].len());
-                 debug!("sending registered connection: [{}]",x);
-     
+                println!("result: {} {}", s,&client.settings[0..].len());
+                debug!("sending registered connection: [{}]",x);
                 self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }
         }
@@ -522,7 +539,7 @@ impl Objects for Server{
         while self.objects.contains_key(&new_pid){
             new_pid = rng.gen::<u32>();
         }
-            let s = String::from_utf8_lossy(&payload[0..]);
+        let s = String::from_utf8_lossy(&payload[0..]);
         debug!("sender:[{}] parent:{} old id {}=>newid {} payload {:?}",sender, parent_id,pid,new_pid, s);
 
         let mut client = self.connections.values().cloned().filter(|ref c| c.addr==addr).next().clone().unwrap();
@@ -564,7 +581,21 @@ impl Objects for Server{
      
     fn unregister_object(&mut self,id:u32)->bool{
         if self.objects.contains_key(&id) {
+            let object = &self.objects[&id].clone();
+            if self.connections.contains_key(&object.owner) {
+                let owner=&self.connections[&object.owner].clone();
+            }
+            let mut out_sender = vec![MSG_WORLD,SR_UNREGISTER_OBJECT];
+            let mut wsender_id:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut wsender_id, object.owner);
+            out_sender.extend_from_slice(&wsender_id);
+
+            let mut wobj_id:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut wobj_id, object.oid);
+            out_sender.extend_from_slice(&wobj_id);
+            //self.broadcast(&out_sender[0..],owner.addr,COND_NONE);
             self.objects.remove(&id);
+
         }
         return true;
     }
