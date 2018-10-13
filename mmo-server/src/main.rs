@@ -383,7 +383,7 @@ impl Router for Server{
 		let mut stale: Vec<u32>=Vec::<u32>::new();
 
 		for (id,client) in &self.connections{
-			if client.instant.elapsed().as_secs() > 60{
+			if client.last_message.elapsed().as_secs() > 240{
 				stale.push(*id);
 			}
 		}
@@ -516,7 +516,7 @@ impl Connections for Server{
             out.extend_from_slice(&client.settings[0..]);
             self.broadcast(&out[0..],addr,COND_OWNERONLY);
             drop(self.socket.send_to(&out[0..],&addr));
-            debug!("USERSTATE REQUEST Message Event to {} - {:?} ",uid,&out[0..]);
+            info!("USERSTATE REQUEST Message Event to {} - {:?} ",uid,&out[0..]);
             return true;
         }else{
              let ids:Vec<u32>=self.connections.values().clone().map(|v| v.guid).collect();
@@ -676,7 +676,7 @@ impl Objects for Server{
             LittleEndian::write_u32(&mut new_id, oid);
             out_sender.extend_from_slice(&new_id);
             out_sender.extend_from_slice(&object.bytes[0..]);
-            debug!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
+            println!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
          
             debug!("Sending objectstate {:?}",&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
@@ -789,7 +789,7 @@ fn main() {
     let mut l = Core::new().unwrap();
     let handle = l.handle();
     let socket = UdpSocket::bind(&addr, &handle).unwrap();
-    debug!("Listening on: {}", socket.local_addr().unwrap());
+    println!("Listening on: {}", socket.local_addr().unwrap());
 
     // Next we'll create a future to spawn (the one we defined above) and then
     // we'll run the event loop by running the future.
