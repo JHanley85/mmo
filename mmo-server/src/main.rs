@@ -65,6 +65,7 @@ const SR_REQUEST_OBJECTSTATE:u8=16;
 const SR_REQUEST_PROPERTYSTATE:u8=17;
 const SR_REJOIN:u8=18;
 const SR_UNREGISTER_OBJECT:u8=19;
+const SR_VOICE:u8=20;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -238,6 +239,14 @@ impl Router for Server{
 				SR_REQUEST_PROPERTYSTATE=>{
                     is_server_request=true;
                     self.propertystate(&msg[2..],peer);
+                    ()
+                }
+                SR_UNREGISTER_OBJECT=>{
+                    ()
+                }
+                SR_VOICE=>{
+                    is_server_request=true;
+                    self.voicedata(&msg[0..],peer);
                     ()
                 }
                 _=>{
@@ -421,6 +430,14 @@ trait Objects{
     fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn propertystate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+}
+trait Voice{
+    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+}
+impl Voice for Server{
+    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+       return self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
+    }
 }
 impl Connections for Server{
     fn rejoin(&mut self,client:Client)->bool{
@@ -737,10 +754,12 @@ impl Future for Server {
 				self.update_client(peer);
                 let mut cop = self.buf[..size].to_vec();
               //  let amt = try_nb!(self.socket.send_to(&self.buf[..size], &peer));
+             info!("Recd [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
                 let sr=self.parse_route(cop.clone(),peer);
                 if !sr {
                     info!("Echoed [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
-                    drop(self.socket.send_to(&cop[0..],&peer));
+                    self.broadcast(&cop[0..],peer,COND_NONE);
+                    // drop(self.socket.send_to(&cop[0..],&peer));
                 }
                 // sr.what();
                 // let outb:&[u8]=Ok(sr).unwrap();
