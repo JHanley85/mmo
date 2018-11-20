@@ -260,7 +260,7 @@ impl Router for Server{
         return is_server_request;
     }
     fn closed_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-        debug!("CLOSE Message Event from {}- {} bytes",sender,msg.len());
+        info!("CLOSE Message Event from {}- {} bytes",sender,msg.len());
        let data_source : &Vec<u32>  =  &self.connections.iter()
         .filter(|&(k,v)| v.addr == sender).map(|(k,v)| *k).collect();
         for uid in data_source.iter(){
@@ -334,8 +334,7 @@ impl Router for Server{
             rep_condition==COND_INITIALOROWNER ||
             rep_condition==COND_AUTONOMOUSONLY ||
             rep_condition==COND_SIMULATEDORPHYSICS ||
-            rep_condition==COND_SKIP ||
-            rep_condition==COND_SKIPOWNER{
+            rep_condition==COND_SKIP {
                 cond=COND_NONE;
             }
             debug!("Sending {} bytes, {:?}",msg.len(),&msg[0..]);
@@ -345,10 +344,10 @@ impl Router for Server{
                 (true)
             }
             COND_SKIPOWNER=>{
-                info!("Skipping send to {}",sender);
+                //info!("Skipping send to {}",sender);
                 for (id,client) in &self.connections{
                     if client.addr != sender {
-                        info!("send to {}",client.addr);
+                        //info!("send to {}",client.addr);
 
                         drop(self.socket.send_to(&msg[0..],&client.addr));
                     }
@@ -434,11 +433,13 @@ trait Objects{
 trait Voice{
     fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool;
 }
+
 impl Voice for Server{
     fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool{
-       return self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
+       return self.broadcast(&msg[0..],addr,COND_NONE);
     }
 }
+
 impl Connections for Server{
     fn rejoin(&mut self,client:Client)->bool{
         info!("Client rejoining: {} {}",client.guid,client.addr);
@@ -477,7 +478,7 @@ impl Connections for Server{
         }else{
             self.rejoin(new_client);
         }
-        debug!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
+        info!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
         let mut existing:Vec<u32> = vec![];
         let mut clients:Vec<Client> = vec![];
@@ -493,7 +494,7 @@ impl Connections for Server{
                 LittleEndian::write_u32(&mut wtr, client.guid);
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&client.settings[0..]);
-                debug!("sending join connection: [{}] to {} @ {}", x, client.guid, client.addr);
+                info!("sending join connection: [{}] to {} @ {}", x, client.guid, client.addr);
                 self.broadcast(&out[0..],addr,COND_SKIPOWNER);
             }else{
                 let mut out = vec![MSG_WORLD,SR_REGISTER];
@@ -503,7 +504,7 @@ impl Connections for Server{
                 out.extend_from_slice(&client.settings[0..]); 
                 let s = String::from_utf8_lossy(&client.settings[0..]);
                 println!("result: {} {}", s,&client.settings[0..].len());
-                debug!("sending registered connection: [{}]",x);
+                info!("sending registered connection: [{}]",x);
                 self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }
         }
@@ -533,12 +534,12 @@ impl Connections for Server{
             out.extend_from_slice(&client.settings[0..]);
             self.broadcast(&out[0..],addr,COND_OWNERONLY);
             drop(self.socket.send_to(&out[0..],&addr));
-            info!("USERSTATE REQUEST Message Event to {} - {:?} ",uid,&out[0..]);
+            debug!("USERSTATE REQUEST Message Event to {} - {:?} ",uid,&out[0..]);
             return true;
         }else{
              let ids:Vec<u32>=self.connections.values().clone().map(|v| v.guid).collect();
              let _ids:Vec<u32>=self.connections.iter().map(|(v,c)| *v).collect();
-              warn!("No user state found! requested {} = {} found {} ids ={:?} {:?}",uid,oid, self.connections.len(),&ids[0..],&_ids[0..]);
+              debug!("No user state found! requested {} = {} found {} ids ={:?} {:?}",uid,oid, self.connections.len(),&ids[0..],&_ids[0..]);
               return false;
         }
     }
@@ -693,13 +694,13 @@ impl Objects for Server{
             LittleEndian::write_u32(&mut new_id, oid);
             out_sender.extend_from_slice(&new_id);
             out_sender.extend_from_slice(&object.bytes[0..]);
-            println!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
+            debug!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
          
             debug!("Sending objectstate {:?}",&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
-            warn!("No object found! {} {}",oid, self.objects.len());
+            debug!("No object found! {} {}",oid, self.objects.len());
             return false;
         }
      }
@@ -734,7 +735,7 @@ impl Objects for Server{
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
-            warn!("No property found! {} {}",oid, self.objects.len());
+            debug!("No property found! {} {}",oid, self.objects.len());
             return false;
         }
      }
@@ -754,10 +755,10 @@ impl Future for Server {
 				self.update_client(peer);
                 let mut cop = self.buf[..size].to_vec();
               //  let amt = try_nb!(self.socket.send_to(&self.buf[..size], &peer));
-             info!("Recd [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
+             debug!("Recd [{}][{}]{} bytes FROM {}",&cop[0],&cop[1], size, peer);
                 let sr=self.parse_route(cop.clone(),peer);
                 if !sr {
-                    info!("Echoed [{}][{}]{} bytes to {}",&cop[0],&cop[1], size, peer);
+                    debug!("Echoed [{}][{}]{} bytes BACK to {}",&cop[0],&cop[1], size, peer);
                     self.broadcast(&cop[0..],peer,COND_NONE);
                     // drop(self.socket.send_to(&cop[0..],&peer));
                 }
