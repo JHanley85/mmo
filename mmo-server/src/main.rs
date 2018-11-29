@@ -547,7 +547,7 @@ impl Connections for Server{
 impl Objects for Server{
      fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
         use rand::Rng;
-        debug!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
+        info!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
         let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
         let mut parent_id:u32 =LittleEndian::read_u32(&mut &msg[4..8]);
         let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]);
@@ -622,7 +622,7 @@ impl Objects for Server{
 
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let s = String::from_utf8_lossy(&msg[0..]);
-        debug!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?} - {:?}",addr,uid,&msg,s);
+        info!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?} - {:?}",addr,uid,&msg,s);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         let mut rng = rand::thread_rng();
         let mut new_oid = rng.gen::<u32>();
@@ -696,11 +696,11 @@ impl Objects for Server{
             out_sender.extend_from_slice(&object.bytes[0..]);
             debug!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
          
-            debug!("Sending objectstate {:?}",&out_sender[0..]);
+            info!("Sending objectstate {:?}",&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
-            debug!("No object found! {} {}",oid, self.objects.len());
+            warn!("No object found! {} {}",oid, self.objects.len());
             return false;
         }
      }
@@ -731,11 +731,11 @@ impl Objects for Server{
             // property payload - being name.
             out_sender.extend_from_slice(&new_prop.bytes[0..]);
 
-            debug!("Sending propertystate {}=> {} {:?}",oid, addr,&out_sender[0..]);
+            info!("Sending propertystate {}=> {} {:?}",oid, addr,&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
-            debug!("No property found! {} {}",oid, self.objects.len());
+            warn!("No property found! {} {}",oid, self.objects.len());
             return false;
         }
      }
@@ -769,7 +769,7 @@ impl Future for Server {
                 
                 debug!("Connections: {}",self.connections.len());
             }
-			self.close_stale_connections();
+			//self.close_stale_connections();
             // If we're here then `to_send` is `None`, so we take a look for the
             // next message we're going to echo back.
             self.to_send = Some(try_nb!(self.socket.recv_from(&mut self.buf)));
