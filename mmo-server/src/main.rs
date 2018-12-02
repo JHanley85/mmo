@@ -472,12 +472,15 @@ impl Connections for Server{
             settings: msg.to_vec(),
             last_message:Instant::now(),
         };
-        
-        if !self.connections.contains_key(&x){
-            self.connections.insert(x,new_client);
-        }else{
-            self.rejoin(new_client);
+        if self.connections.contains_key(&x){
+            let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==x).map(|(k,v)| *k).collect();
+            for oid in stale_objects{
+                self.unregister_object(oid);
+            }
+             self.rejoin(new_client.clone());
+         
         }
+        self.connections.insert(x,new_client.clone());
         info!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
         let msg_map = HashMap::<SocketAddr,&[u8]>::new();
         let mut existing:Vec<u32> = vec![];
@@ -491,21 +494,29 @@ impl Connections for Server{
             if x!=client.guid {
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
-                LittleEndian::write_u32(&mut wtr, client.guid);
+                LittleEndian::write_u32(&mut wtr, new_client.guid);
                 out.extend_from_slice(&wtr);
-                out.extend_from_slice(&client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, client.guid, client.addr);
-                self.broadcast(&out[0..],addr,COND_SKIPOWNER);
-            }else{
-                let mut out = vec![MSG_WORLD,SR_REGISTER];
+                out.extend_from_slice(&new_client.settings[0..]);
+                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
+                self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER);
+                
+                let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
-                LittleEndian::write_u32(&mut wtr, client.guid);
+                LittleEndian::write_u32(&mut wtr, new_client.guid);
                 out.extend_from_slice(&wtr);
-                out.extend_from_slice(&client.settings[0..]); 
-                let s = String::from_utf8_lossy(&client.settings[0..]);
-                println!("result: {} {}", s,&client.settings[0..].len());
-                info!("sending registered connection: [{}]",x);
-                self.broadcast(&out[0..],addr,COND_OWNERONLY);
+                out.extend_from_slice(&new_client.settings[0..]);
+                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
+                self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
+            }else{
+                    let mut out = vec![MSG_WORLD,SR_REGISTER];
+                    let mut wtr:Vec<u8>=vec![0;4];
+                    LittleEndian::write_u32(&mut wtr, new_client.guid);
+                    out.extend_from_slice(&wtr);
+                    out.extend_from_slice(&new_client.settings[0..]); 
+                    let s = String::from_utf8_lossy(&new_client.settings[0..]);
+                    println!("result: {} {}", s,&new_client.settings[0..].len());
+                    info!("sending registered connection: [{}]",x);
+                    self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }
         }
         return true
