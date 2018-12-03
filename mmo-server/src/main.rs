@@ -461,7 +461,7 @@ impl Connections for Server{
         let mut x = rng.gen::<u32>();
         let mut preexisting = false;
         for (uid,client) in self.connections.iter(){
-                if client.addr==addr{
+                if client.addr.ip()==addr.ip(){
                     x=client.guid;
                 }   
         }
@@ -473,11 +473,13 @@ impl Connections for Server{
             last_message:Instant::now(),
         };
         if self.connections.contains_key(&x){
+                info!("is a rejoin {}", x);
             let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==x).map(|(k,v)| *k).collect();
             for oid in stale_objects{
+                info!("Removing object {} from{}",oid, x);
                 self.unregister_object(oid);
             }
-             self.rejoin(new_client.clone());
+            // self.rejoin(new_client.clone());
          
         }
         self.connections.insert(x,new_client.clone());
@@ -503,7 +505,7 @@ impl Connections for Server{
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
-                out.extend_from_slice(&wtr);
+                out.extend_from_slice(&wtr);                        
                 out.extend_from_slice(&client.settings[0..]);
                 info!("sending join connection: [{}] to {} @ {}", x, client.guid, new_client.addr);
                 self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
