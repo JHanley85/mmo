@@ -473,10 +473,10 @@ impl Connections for Server{
             last_message:Instant::now(),
         };
         if self.connections.contains_key(&x){
-                info!("is a rejoin {}", x);
+                debug!("is a rejoin {}", x);
             let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==x).map(|(k,v)| *k).collect();
             for oid in stale_objects{
-                info!("Removing object {} from{}",oid, x);
+                debug!("Removing object {} from{}",oid, x);
                 self.unregister_object(oid);
             }
             // self.rejoin(new_client.clone());
@@ -499,7 +499,7 @@ impl Connections for Server{
                 LittleEndian::write_u32(&mut wtr, new_client.guid);
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&new_client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
+                debug!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
                 self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER);
                 
                 let mut out = vec![MSG_WORLD,SR_JOINED];
@@ -507,7 +507,7 @@ impl Connections for Server{
                 LittleEndian::write_u32(&mut wtr, client.guid);
                 out.extend_from_slice(&wtr);                        
                 out.extend_from_slice(&client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, client.guid, new_client.addr);
+                debug!("sending join connection: [{}] to {} @ {}", x, client.guid, new_client.addr);
                 self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
             }else{
                     let mut out = vec![MSG_WORLD,SR_REGISTER];
@@ -517,7 +517,7 @@ impl Connections for Server{
                     out.extend_from_slice(&new_client.settings[0..]); 
                     let s = String::from_utf8_lossy(&new_client.settings[0..]);
                     println!("result: {} {}", s,&new_client.settings[0..].len());
-                    info!("sending registered connection: [{}]",x);
+                    debug!("sending registered connection: [{}]",x);
                     self.broadcast(&out[0..],addr,COND_OWNERONLY);
             }
         }
@@ -635,7 +635,7 @@ impl Objects for Server{
 
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let s = String::from_utf8_lossy(&msg[0..]);
-        info!("OBJECT_REGISTRATION Message Event from {}- {} bytes ={:?} - {:?}",addr,uid,&msg,s);
+        info!("OBJECT_REGISTRATION Message Event from {}- {} bytes = {:?}",addr,uid,s);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         let mut rng = rand::thread_rng();
         let mut new_oid = rng.gen::<u32>();
@@ -709,7 +709,7 @@ impl Objects for Server{
             out_sender.extend_from_slice(&object.bytes[0..]);
             debug!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
          
-            info!("Sending objectstate {:?}",&out_sender[0..]);
+            debug!("Sending objectstate {:?}",&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
@@ -744,7 +744,7 @@ impl Objects for Server{
             // property payload - being name.
             out_sender.extend_from_slice(&new_prop.bytes[0..]);
 
-            info!("Sending propertystate {}=> {} {:?}",oid, addr,&out_sender[0..]);
+            info!("Sending propertystate {}=> {}",oid, addr);
             self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
             return true;
         }else{
