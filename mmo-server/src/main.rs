@@ -77,18 +77,26 @@ const COND_INITIALOROWNER:u8=6; // - This property will send on the initial pack
 const COND_CUSTOM:u8=7; // - This property has no particular condition, but wants the ability to toggle on/off via SetCustomIsActiveOverride
 const COND_NONE:u8=8; // - This property will send to sender, and all listeners
 const COND_SKIP:u8=0;
+extern crate serde;
+#[macro_use]
+extern crate serde_json;
+#[macro_use]
+extern crate serde_derive;
+use serde_json::Error;
 
-
+use std::fs::File;
+use std::io::prelude::*;
 
 pub enum ServerError {
     Variant1,
     Variant2,
 }
 
-#[derive(Eq, PartialEq, Debug,Clone)]
+#[derive(Eq, PartialEq, Debug,Clone,Serialize)]
 struct ObjectRep{
     oid:u32, // object id
     parent_id:u32, //owning object, if any
+    // #[serde(serialize_with = "approx_string")]
     bytes:Vec<u8>, //data
     owner:u32, //registering player
     rid:u32  //Origination request id.
@@ -407,20 +415,70 @@ impl Router for Server{
 	}
 }
 
-#[derive(Hash, Eq, PartialEq, Debug,Clone)]
+#[derive(Hash, Eq, PartialEq, Debug,Clone,Serialize)]
 pub struct Client {
+    
+    #[serde(with = "approx_instant")]
     pub instant: Instant,
     pub guid: u32,
-    pub addr: SocketAddr,
+    pub addr: SocketAddr, 
+    // #[serde(serialize_with ="approx_string")]
     pub settings:Vec<u8>,
+    
+    #[serde(with = "approx_instant")]
     pub last_message:Instant
 }
+// // mod approx_string {
+//     use serde::{Serialize, Serializer, Deserialize, Deserializer};
+//     pub fn approx_string<S>(key: &Vec<u8>, serializer: &mut S) -> Result<S::Ok, S::Error>
+//         where S: Serializer
+//     {
+//         let s =String::from_utf8_lossy(&key[0..]);
+//         serializer.serialize_str(&s)
+//     }
+    
+    // pub fn deserialize<'de, T, D>(deserializer: &mut D) -> Result<T, D::Error>
+    //     where   D: Deserializer<'de>,
+    //             T: From<Vec<u8>>,
+    // {
+    //             //let de = String::deserialize(deserializer)?;
+    //             let approx = vec![0,0,0,0];//de.as_bytes().to_vec();
+    //             ByteBuf::deserialize(deserializer).map(|buf| Into::<Vec<u8>>::into(buf).into())
+    // }
+// }
+    
+mod approx_instant {
+    use std::time::{Instant, SystemTime};
+    use serde::{Serialize, Serializer, Deserialize, Deserializer, de::Error};
 
+    pub fn serialize<S>(instant: &Instant, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let system_now = SystemTime::now();
+        let instant_now = Instant::now();
+        let approx = system_now - (instant_now - *instant);
+        approx.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Instant, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let de = SystemTime::deserialize(deserializer)?;
+        let system_now = SystemTime::now();
+        let instant_now = Instant::now();
+        let duration = system_now.duration_since(de).map_err(Error::custom)?;
+        let approx = instant_now - duration;
+        Ok(approx)
+    }
+}
 trait Connections{
     fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
     fn notify_new_connection(&mut self,id:u32)->bool;
     fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn rejoin(&mut self, client:Client)->bool;
+    fn print_connection(&mut self,client: Client)->std::io::Result<()>;
 }
 trait Objects{
     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
@@ -429,6 +487,7 @@ trait Objects{
     fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
     fn propertystate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn save_objects(&mut self)->std::io::Result<()>;
 }
 trait Voice{
     fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool;
@@ -441,6 +500,20 @@ impl Voice for Server{
 }
 
 impl Connections for Server{
+   
+    fn print_connection(&mut self,client:Client)->std::io::Result<()>{
+        let c=json!({
+            "address":client.addr,
+            "guid": client.guid,
+            "settings":String::from_utf8_lossy(&client.settings[0..]),
+        });
+
+        let mut filename= format!("client_{:?}.json",client.guid);
+        serde_json::to_writer(&File::create(filename)?, &c)?;
+        Ok(())
+
+        
+    }
     fn rejoin(&mut self,client:Client)->bool{
         info!("Client rejoining: {} {}",client.guid,client.addr);
         let mut out = vec![MSG_WORLD,SR_REJOIN];
@@ -461,7 +534,7 @@ impl Connections for Server{
         let mut x = rng.gen::<u32>();
         let mut preexisting = false;
         for (uid,client) in self.connections.iter(){
-                if client.addr==addr{
+                if client.addr.ip()==addr.ip(){
                     x=client.guid;
                 }   
         }
@@ -474,10 +547,12 @@ impl Connections for Server{
         };
         if self.connections.contains_key(&x){
             let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==x).map(|(k,v)| *k).collect();
+            info!("Client exists already {}", x);
             for oid in stale_objects{
                 self.unregister_object(oid);
+                info!("removing old object {} from previous registration",oid);
             }
-             self.rejoin(new_client.clone());
+            //self.rejoin(new_client.clone());
          
         }
         self.connections.insert(x,new_client.clone());
@@ -492,22 +567,27 @@ impl Connections for Server{
          }
         for client in clients{
             if x!=client.guid {
-                let mut out = vec![MSG_WORLD,SR_JOINED];
-                let mut wtr:Vec<u8>=vec![0;4];
-                LittleEndian::write_u32(&mut wtr, new_client.guid);
-                out.extend_from_slice(&wtr);
-                out.extend_from_slice(&new_client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
-                self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER);
                 
+                let s = String::from_utf8_lossy(&client.settings[0..]);
+                // Send Me to All as join
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, new_client.guid);
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&new_client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
+                info!("sending join connection: [{}] {} => {}", x, new_client.guid,s);
+                self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER);
+
+                // Send all to Me as join
+                let mut out = vec![MSG_WORLD,SR_JOINED];
+                let mut wtr:Vec<u8>=vec![0;4];
+                LittleEndian::write_u32(&mut wtr, client.guid);
+                out.extend_from_slice(&wtr);
+                out.extend_from_slice(&client.settings[0..]);
+                info!("sending join connection: [{}] => {} @ {}", x, client.guid, s);
                 self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
             }else{
+                // Send Me to Me as register
                     let mut out = vec![MSG_WORLD,SR_REGISTER];
                     let mut wtr:Vec<u8>=vec![0;4];
                     LittleEndian::write_u32(&mut wtr, new_client.guid);
@@ -515,10 +595,11 @@ impl Connections for Server{
                     out.extend_from_slice(&new_client.settings[0..]); 
                     let s = String::from_utf8_lossy(&new_client.settings[0..]);
                     println!("result: {} {}", s,&new_client.settings[0..].len());
-                    info!("sending registered connection: [{}]",x);
-                    self.broadcast(&out[0..],addr,COND_OWNERONLY);
+                    info!("sending register connection: [{}] => {} @ {}", x, client.guid,s);
+                    self.broadcast(&out[0..],client.addr,COND_OWNERONLY);
             }
         }
+        drop(self.print_connection(new_client));
         return true
     }
 
@@ -556,6 +637,36 @@ impl Connections for Server{
     }
 }
 impl Objects for Server{
+     fn save_objects(&mut self)->std::io::Result<()>{
+        
+        let o = json!({
+            "objects":self.objects.clone(),
+            "clients":self.connections.clone()
+        });
+        // for (uid,obj) in self.objects.iter(){
+        //         o["objects"].push(
+        //         json!({
+        //             "oid":obj.oid,
+        //             "parent_id":obj.parent_id,
+        //             "bytes":String::from_utf8_lossy(&obj.bytes[0..]),
+        //             "owner":obj.owner,
+        //             "rid":obj.rid
+        //         })
+        //     )
+        // }
+        // for (uid,client) in   self.connections.iter(){
+        //       o["clients"].push(
+        //         json!({
+        //             "address":client.addr,
+        //             "guid": client.guid,
+        //             "settings":String::from_utf8_lossy(&client.settings[0..]),
+        //         })
+        //     )
+        // }
+        let mut filename= format!("objects.json");
+        serde_json::to_writer(&File::create(filename)?, &o)?;
+        Ok(())
+    }
      fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
         use rand::Rng;
         info!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
@@ -677,7 +788,7 @@ impl Objects for Server{
             debug!("Sending {:?}",&out_sender[0..]);
             self.broadcast(&out_sender[0..],addr,COND_NONE);
 
-
+            drop(self.save_objects());
          return true;
 
      }
@@ -809,6 +920,8 @@ fn app()-> App<'static, 'static> {
             .takes_value(true))
 }
 
+
+
 fn main() {
     //! Main.
     env_logger::init();
@@ -826,6 +939,7 @@ fn main() {
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
     let mut objects=HashMap::<u32,ObjectRep>::new();
+    
     l.run(Server{
         socket: socket,
         connections:connections,
@@ -833,4 +947,7 @@ fn main() {
         buf: vec![0; 65507],
         to_send: None,
        }).unwrap();
+
 }
+
+

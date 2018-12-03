@@ -13,6 +13,12 @@ log = "0.4"
 uuid = { version = "0.6.5", features = ["v4","v5"] }
 rand = "0.3.15"
 env_logger = "0.5.13"
+serde_json = "1.0"
+serde_derive = "1.0"
+serde = "1.0"
+staticfile = "*"
+iron = "*"
+mount="*"
 
 [[bin]]
 name = "mmo-server"
@@ -22,3 +28,6 @@ path = "src/main.rs"
 name = "old-mmo-server"
 path = "src/old.rs"
 
+[[bin]]
+name = "static"
+path = "src/static.rs"

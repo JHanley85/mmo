@@ -31,4 +31,5 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get -y install ca-certificates libssl-dev net-tools iputils-ping nmap && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build-out /
 EXPOSE 8080/tcp 8080/udp
+EXPOSE 8000/tcp
 CMD mmo-server -- --address 0.0.0.0:8080
