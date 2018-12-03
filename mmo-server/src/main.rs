@@ -502,10 +502,10 @@ impl Connections for Server{
                 
                 let mut out = vec![MSG_WORLD,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
-                LittleEndian::write_u32(&mut wtr, new_client.guid);
+                LittleEndian::write_u32(&mut wtr, client.guid);
                 out.extend_from_slice(&wtr);
-                out.extend_from_slice(&new_client.settings[0..]);
-                info!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
+                out.extend_from_slice(&client.settings[0..]);
+                info!("sending join connection: [{}] to {} @ {}", x, client.guid, new_client.addr);
                 self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
             }else{
                     let mut out = vec![MSG_WORLD,SR_REGISTER];
