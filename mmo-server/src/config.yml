@@ -1,0 +1,21 @@
+name: mmo-server
+version: "0.2.0"
+author: Jack Hanley <jack.hanley@redpillvr.com>
+about: Route level unreal networking
+args:
+    - addr:
+        short: a
+        long: address
+        help: Host to connect to address:port
+        takes_value: true
+    - exp:
+        short: e
+        long: expiration
+        help: Connection Expiration limit (s)
+        takes_value: true
+    - inspect:
+        short: i
+        long: inspect
+        help: add inspectable json
+        multiple: true
+        global: true

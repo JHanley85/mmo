@@ -29,7 +29,7 @@ extern crate rand;
 
 use std::{io};
 use std::net::SocketAddr;
-
+use std::env;
 use futures::{Future, Poll};
 use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
@@ -103,6 +103,7 @@ struct ObjectRep{
 }
 
 struct Server {
+    inspect: bool,
     socket: UdpSocket,
     buf: Vec<u8>,
     to_send: Option<(usize, SocketAddr)>,
@@ -534,8 +535,10 @@ impl Connections for Server{
         let mut x = rng.gen::<u32>();
         let mut preexisting = false;
         for (uid,client) in self.connections.iter(){
-                if client.addr.ip()==addr.ip(){
-                    x=client.guid;
+                // if client.addr.ip()==addr.ip(){
+                if client.addr==addr{
+                    info!("Client exists already {} Removing because i hate him", x);
+                  //  x=client.guid;
                 }   
         }
         let new_client = Client{
@@ -638,33 +641,14 @@ impl Connections for Server{
 }
 impl Objects for Server{
      fn save_objects(&mut self)->std::io::Result<()>{
-        
-        let o = json!({
-            "objects":self.objects.clone(),
-            "clients":self.connections.clone()
-        });
-        // for (uid,obj) in self.objects.iter(){
-        //         o["objects"].push(
-        //         json!({
-        //             "oid":obj.oid,
-        //             "parent_id":obj.parent_id,
-        //             "bytes":String::from_utf8_lossy(&obj.bytes[0..]),
-        //             "owner":obj.owner,
-        //             "rid":obj.rid
-        //         })
-        //     )
-        // }
-        // for (uid,client) in   self.connections.iter(){
-        //       o["clients"].push(
-        //         json!({
-        //             "address":client.addr,
-        //             "guid": client.guid,
-        //             "settings":String::from_utf8_lossy(&client.settings[0..]),
-        //         })
-        //     )
-        // }
-        let mut filename= format!("objects.json");
-        serde_json::to_writer(&File::create(filename)?, &o)?;
+        if self.inspect{
+            let o = json!({
+                "objects":self.objects.clone(),
+                "clients":self.connections.clone()
+            });
+            let mut filename= format!("objects.json");
+            serde_json::to_writer(&File::create(filename)?, &o)?;
+        }
         Ok(())
     }
      fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
@@ -902,45 +886,54 @@ impl Future for Server {
   
 }
 
-fn app()-> App<'static, 'static> {
-    //! get args and info
-    App::new("mmo-server")
-        .version("0.1.0")
-        .about("Simulates a slice of universe!")
-        .author("Alex Rozgo")
-        .arg(Arg::with_name("addr")
-            .short("a")
-            .long("address")
-            .help("Host to connect to address:port")
-            .takes_value(true))
-        .arg(Arg::with_name("exp")
-            .short("e")
-            .long("expiration")
-            .help("Connection expiration limit")
-            .takes_value(true))
-}
+// fn app()-> App<'static, 'static> {
+//     //! get args and info
+//     App::new("mmo-server")
+//         .version("0.2.0")
+//         .about("Route level unreal networking")
+//         .author("Jack Hanley <jack.hanley@redpillvr.com>")
+//         .arg(Arg::with_name("addr")
+//             .short("a")
+//             .long("address")
+//             .help("Host to connect to address:port")
+//             .takes_value(true))
+//         .arg(Arg::with_name("exp")
+//             .short("e")
+//             .long("expiration")
+//             .help("Connection expiration limit")
+//             .takes_value(true))
+//         .arg(Arg::with_name("debug")
+//             .short("d")
+//             .long("debug")
+//             .help("Adds printed objects")
+//             .takes_value(false))
+// }
 
 
 
 fn main() {
     //! Main.
     env_logger::init();
-    let matches = app().get_matches();
+    let external_port = env::var("EXPOSED_PORT");
+    let yaml = load_yaml!("config.yml");
+    let matches = App::from_yaml(yaml).get_matches();
     let addr = matches.value_of("addr").unwrap_or("127.0.0.1:8080");
     let addr = addr.parse::<SocketAddr>().unwrap();
+    let inspect =  matches.is_present("inspect");
     // Create the event loop that will drive this server, and also bind the
     // socket we'll be listening to.
     let mut l = Core::new().unwrap();
     let handle = l.handle();
     let socket = UdpSocket::bind(&addr, &handle).unwrap();
     println!("Listening on: {}", socket.local_addr().unwrap());
-
+    println!("External port: {:?}", external_port);
     // Next we'll create a future to spawn (the one we defined above) and then
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
     let mut objects=HashMap::<u32,ObjectRep>::new();
     
     l.run(Server{
+        inspect: inspect,
         socket: socket,
         connections:connections,
         objects:objects,
