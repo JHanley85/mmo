@@ -5,15 +5,13 @@ services:
     container_name: hamachi
     network_mode: host
     volumes:
-      - '/etc/localtime:/etc/localtime:ro'
       - '$HOME/.config/hamachi:/config'
     restart: always
     environment:
-      - ACCOUNT="jack.hanley@redpillvr.com"
-      - NETWORK="redpillvr-dev-docker"
-      - PASS=""
+      - ACCOUNT=$HAM_USER
+      - NETWORK=$HAM_NETWORK
+      - PASS=$HAM_PASSWORD
     privileged: true
-    
   mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -23,12 +21,11 @@ services:
     environment:
       - VIRTUAL_PORT=8080
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_LOG=info
       - RUST_BACKTRACE=1
+      - RUST_LOG=debug
     networks:
       app_net:
         ipv4_address: 192.168.88.20
-            
   mmo-server1:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -38,12 +35,10 @@ services:
     environment:
       - VIRTUAL_PORT=8081
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_LOG=info
       - RUST_BACKTRACE=1
     networks:
       app_net:
         ipv4_address: 192.168.88.21
-            
   mmo-server2:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -53,12 +48,10 @@ services:
     environment:
       - VIRTUAL_PORT=8082
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_LOG=info
       - RUST_BACKTRACE=1
     networks:
       app_net:
         ipv4_address: 192.168.88.22
-            
   mmo-server3:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -68,12 +61,10 @@ services:
     environment:
       - VIRTUAL_PORT=8083
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_LOG=info
       - RUST_BACKTRACE=1
     networks:
       app_net:
         ipv4_address: 192.168.88.23
-            
   mmo-server4:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -83,7 +74,6 @@ services:
     environment:
       - VIRTUAL_PORT=8084
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_LOG=info
       - RUST_BACKTRACE=1
     networks:
       app_net:
@@ -106,8 +96,9 @@ services:
       /bin/sh -c ' envsubst < /usr/share/nginx/www/index.html > /usr/share/nginx/html/index.html &&  envsubst < /etc/nginx/conf.d/web.template > /etc/nginx/conf.d/default.conf &&  nginx -g "daemon off;"'
     depends_on:
       - mmo-server
-      - hamachi
-    network_mode: host
+    networks:
+      app_net:
+        ipv4_address: 192.168.88.25
 networks:
   app_net:
     ipam:

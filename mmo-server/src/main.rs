@@ -461,7 +461,7 @@ impl Connections for Server{
         let mut x = rng.gen::<u32>();
         let mut preexisting = false;
         for (uid,client) in self.connections.iter(){
-                if client.addr.ip()==addr.ip(){
+                if client.addr==addr{
                     x=client.guid;
                 }   
         }
@@ -782,7 +782,7 @@ impl Future for Server {
                 
                 debug!("Connections: {}",self.connections.len());
             }
-			//self.close_stale_connections();
+			self.close_stale_connections();
             // If we're here then `to_send` is `None`, so we take a look for the
             // next message we're going to echo back.
             self.to_send = Some(try_nb!(self.socket.recv_from(&mut self.buf)));
