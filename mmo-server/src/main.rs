@@ -29,6 +29,7 @@ extern crate rand;
 
 use std::{io};
 use std::net::SocketAddr;
+use std::string::String;
 
 use futures::{Future, Poll};
 use tokio_core::net::UdpSocket;
@@ -120,7 +121,7 @@ trait Router{
 	fn close_connection(&mut self,uid:&u32)->bool;
 }
 
-
+use std::borrow::BorrowMut;
 impl Router for Server{
     fn get_sender_id(&mut self,sender:SocketAddr)->u32{
          let data_source : &Vec<u32>  =  &self.connections.iter()
@@ -164,6 +165,10 @@ impl Router for Server{
                     }()
                 }
                 SR_PROPERTYREP=>{
+                    if senderid==0 {
+                        self.property_message(&msg[0..],peer);
+                        is_server_request=true;
+                    }
                     if senderid!=0 {
                         self.property_message(&msg[0..],peer);
                         is_server_request=true;
@@ -289,7 +294,18 @@ impl Router for Server{
 
     }
     fn property_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-        debug!("PROPERTY Message Event from {}- {} bytes",sender,msg.len());
+        let mut id = self.get_sender_id(sender);
+        if id==0 {
+             id=LittleEndian::read_u32(&msg[0 .. 4]);
+             let mut result=self.connections.get_mut(&id);
+             match result{
+                 Some(client)=>client.addr=sender,
+                 None=>println!("Unkown guid")
+             }
+        }
+        //  let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
+
+        debug!("PROPERTY Message Event from [{}] {}- {} bytes",id,sender,msg.len());
         self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
         return true;
 
@@ -368,19 +384,13 @@ impl Router for Server{
     }
 	
 	fn update_client(&mut self,peer:SocketAddr)->bool{
-		 let data_source : &Vec<Client>  =  &self.connections.iter()
-        .filter(|&(k,v)| v.addr == peer).map(|(k,v)| (v).clone()).collect();
-		for client in data_source{
-			let new_client = Client{
-            instant:client.instant,
-            guid: client.guid,
-            addr: client.addr,
-            settings: client.settings.clone(),
-            last_message:Instant::now(),
-        };
-			self.connections.insert(new_client.guid,new_client);
+		for client in self.connections.values_mut(){
+			if  client.is_same(peer) {
+					info!("Updating Client");
+					return client.update();
+			}
 		}
-		return data_source.len() > 0;
+		 return false;
 	}
 	fn close_connection(&mut self,uid:&u32)->bool{
 		info!("Closing connection {}",uid);
@@ -405,6 +415,19 @@ impl Router for Server{
         
 		return true;
 	}
+}
+impl Client{
+	pub fn update(&mut self)->bool{
+		let now = Instant::now();
+		
+		let b = now.duration_since(self.last_message).as_secs() > 0;
+		self.last_message = now;
+        println!("Updating {:?}",&self.addr.to_string());
+		return b;
+	}
+	pub fn is_same(&mut self,addr: SocketAddr)->bool{
+		return self.addr == addr;
+		}
 }
 
 #[derive(Hash, Eq, PartialEq, Debug,Clone)]
@@ -475,12 +498,6 @@ impl Connections for Server{
         if self.connections.contains_key(&x){
                 debug!("is a rejoin {}", x);
             let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==x).map(|(k,v)| *k).collect();
-            for oid in stale_objects{
-                debug!("Removing object {} from{}",oid, x);
-                self.unregister_object(oid);
-            }
-            // self.rejoin(new_client.clone());
-         
         }
         self.connections.insert(x,new_client.clone());
         info!("Adding connection: [{}] {}. Now {}",x,addr,self.connections.len());
@@ -562,6 +579,18 @@ impl Objects for Server{
         use rand::Rng;
         info!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
         let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
+          let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
+		let temp = Client{
+				instant: Instant::now(),
+				guid: sender,
+				addr: addr,
+				settings: msg.to_vec(),
+				last_message:Instant::now(),
+			};
+		 self.connections.entry(sender)
+		 // .or_insert_with(||temp)
+		 .and_modify(|e|{  e.addr = addr});
+	
         let mut parent_id:u32 =LittleEndian::read_u32(&mut &msg[4..8]);
         let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]);
         let mut payload = &msg[12..];
@@ -758,40 +787,31 @@ impl Future for Server {
     type Item = ();
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(), io::Error> {
+       fn poll(&mut self) -> Poll<(), io::Error> {
         loop {
-            // First we check to see if there's a message we need to echo back.
-            // If so then we try to send it back to the original source, waiting
-            // until it's writable and we're able to do so.
             if let Some((size, peer)) = self.to_send {
-			
 				self.update_client(peer);
-                let mut cop = self.buf[..size].to_vec();
-              //  let amt = try_nb!(self.socket.send_to(&self.buf[..size], &peer));
-             debug!("Recd [{}][{}]{} bytes FROM {}",&cop[0],&cop[1], size, peer);
-                let sr=self.parse_route(cop.clone(),peer);
-                if !sr {
-                    debug!("Echoed [{}][{}]{} bytes BACK to {}",&cop[0],&cop[1], size, peer);
-                    self.broadcast(&cop[0..],peer,COND_NONE);
-                    // drop(self.socket.send_to(&cop[0..],&peer));
-                }
-                // sr.what();
-                // let outb:&[u8]=Ok(sr).unwrap();
-                // self.socket(send_to(cop.to))
-                self.to_send = None;
-                
-                debug!("Connections: {}",self.connections.len());
+                self.close_stale_connections();
+					if size>1 {
+						let mut cop = self.buf[..size].to_vec();
+					     debug!("Recd [{}][{}]{} bytes FROM {}",&cop[0],&cop[1], size, peer);
+						let sr=self.parse_route(cop.clone(),peer);
+						if !sr {
+							debug!("Echoed [{}][{}]{} bytes BACK to {}",&cop[0],&cop[1], size, peer);
+							self.broadcast(&cop[0..],peer,COND_NONE);
+						}
+					}else{
+                        println!("PONG {:?}",&peer);
+					}
+					self.to_send = None;
+					debug!("Connections: {}",self.connections.len());
+					debug!("Objects: {}",self.objects.len());
             }
-			self.close_stale_connections();
-            // If we're here then `to_send` is `None`, so we take a look for the
-            // next message we're going to echo back.
             self.to_send = Some(try_nb!(self.socket.recv_from(&mut self.buf)));
-            
         }
     }
-
-  
 }
+
 
 fn app()-> App<'static, 'static> {
     //! get args and info

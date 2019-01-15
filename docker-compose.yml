@@ -1,23 +1,10 @@
 version: '3.3'
 services:
-  hamachi:
-    image: gfjardim/hamachi
-    container_name: hamachi
-    network_mode: host
-    volumes:
-      - '$HOME/.config/hamachi:/config'
-    restart: always
-    environment:
-      - ACCOUNT=$HAM_USER
-      - NETWORK=$HAM_NETWORK
-      - PASS=$HAM_PASSWORD
-    privileged: true
   mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
     ports:
       - '8010:8080/udp'
-      - '8080'
     environment:
       - VIRTUAL_PORT=8080
       - VIRTUAL_HOST=mmo.htpc
@@ -25,33 +12,28 @@ services:
       - RUST_LOG=debug
     networks:
       app_net:
-        ipv4_address: 192.168.88.20
   mmo-server1:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
     ports:
       - '8011:8080/udp'
-      - '8080'
     environment:
       - VIRTUAL_PORT=8081
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
     networks:
       app_net:
-        ipv4_address: 192.168.88.21
   mmo-server2:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
     ports:
       - '8012:8080/udp'
-      - '8080'
     environment:
       - VIRTUAL_PORT=8082
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
     networks:
       app_net:
-        ipv4_address: 192.168.88.22
   mmo-server3:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -62,9 +44,6 @@ services:
       - VIRTUAL_PORT=8083
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
-    networks:
-      app_net:
-        ipv4_address: 192.168.88.23
   mmo-server4:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
@@ -75,9 +54,9 @@ services:
       - VIRTUAL_PORT=8084
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
+      - RUST_LOG=debug
     networks:
       app_net:
-        ipv4_address: 192.168.88.24
   web:
     build: ./web/.
     image: 'nginx:stable-alpine'
@@ -98,12 +77,9 @@ services:
       - mmo-server
     networks:
       app_net:
-        ipv4_address: 192.168.88.25
 networks:
   app_net:
     ipam:
       driver: default
-      config:
-        - subnet: 192.168.88.0/24
 volumes:
   src: null
