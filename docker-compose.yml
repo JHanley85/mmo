@@ -1,5 +1,16 @@
 version: '3.3'
 services:
+  hamachi:
+    image: gfjardim/hamachi
+    network_mode: host
+    volumes:
+      - '$HOME/.config/hamachi:/config'
+    restart: always
+    environment:
+      - ACCOUNT=$HAM_USER
+      - NETWORK=$HAM_NETWORK
+      - PASS=$HAM_PASSWORD
+    privileged: true
   mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'

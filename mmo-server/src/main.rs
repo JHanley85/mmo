@@ -295,17 +295,18 @@ impl Router for Server{
     }
     fn property_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
         let mut id = self.get_sender_id(sender);
+        let mut sid=LittleEndian::read_u32(&msg[2 .. 6]);;
         if id==0 {
-             id=LittleEndian::read_u32(&msg[0 .. 4]);
+             id=LittleEndian::read_u32(&msg[2 .. 6]);
              let mut result=self.connections.get_mut(&id);
              match result{
                  Some(client)=>client.addr=sender,
-                 None=>println!("Unkown guid")
+                 None=>println!("Unknown guid {:?}",&id)
              }
         }
         //  let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
 
-        debug!("PROPERTY Message Event from [{}] {}- {} bytes",id,sender,msg.len());
+        debug!("PROPERTY Message Event from [{}][{}] {}- {} bytes",id,sid,sender,msg.len());
         self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
         return true;
 
@@ -353,7 +354,7 @@ impl Router for Server{
             rep_condition==COND_SKIP {
                 cond=COND_NONE;
             }
-            debug!("Sending {} bytes, {:?}",msg.len(),&msg[0..]);
+         //   debug!("Sending {} bytes, {:?}",msg.len(),&msg[0..]);
         match cond{
             COND_OWNERONLY=>{
                     drop(self.socket.send_to(&msg[0..],&sender));
