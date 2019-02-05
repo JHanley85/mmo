@@ -13,6 +13,8 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]
+ #![feature(drain_filter)]
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -40,10 +42,18 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
 
+const ACK_TIME_SECS: u64  =2;
+
 const MSG_PING: u8=0;
-const MSG_WORLD: u8=1;
+const MSG_UNRELIABLE: u8=1;
 const MSG_AVATAR: u8=2;
 const MSG_BYTE_ARRAY: u8=4;
+//const MSG_NETGUID:u8 = 5;
+const MSG_RELIABLE:u8 =6;
+//const MSG_FLOAT:u8 = 10;
+//const MSG_INT:u8 = 11;
+//const MSG_STRING:u8 = 12;
+
 //Server requests
 
 const SR_TIME:u8=0;
@@ -60,6 +70,7 @@ const SR_CLOSED:u8=10;
 const SR_SESSION_UPDATE:u8=11;
 const SR_PLAYER_STATE_UPDATE:u8=12;
 const SR_REGISTRATION_SPAWNED:u8=13;
+const SR_REGISTER_OBJECT:u8=13; //just changing the name.
 const SR_REGISTER_PROPERTY:u8=14;
 const SR_REQUEST_USERSTATE:u8=15;
 const SR_REQUEST_OBJECTSTATE:u8=16;
@@ -67,6 +78,8 @@ const SR_REQUEST_PROPERTYSTATE:u8=17;
 const SR_REJOIN:u8=18;
 const SR_UNREGISTER_OBJECT:u8=19;
 const SR_VOICE:u8=20;
+const SR_PUBLISH_ACK:u8=21;
+
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -92,8 +105,15 @@ struct ObjectRep{
     parent_id:u32, //owning object, if any
     bytes:Vec<u8>, //data
     owner:u32, //registering player
-    rid:u32  //Origination request id.
+    rid:u32,  //Origination request id.
+    obj_route:u8
 }
+struct AckMessage{
+    update_time: Instant,
+    object: u32,
+    client_id: u32
+}
+
 
 struct Server {
     socket: UdpSocket,
@@ -101,28 +121,83 @@ struct Server {
     to_send: Option<(usize, SocketAddr)>,
     connections:HashMap<u32,Client>,
     objects:HashMap<u32,ObjectRep>, 
+    published_acks:Vec<AckMessage>, // object id to ack, user ids that havent responded.
 }
 pub type ServerRouteResult = Result<Vec<u8>,ServerError>;
 trait Router{
+    fn recv_ack(&mut self,client_id:u32,guid:u32)->bool;
+    fn resend_acks(&mut self)->bool;
     fn get_sender_id(&mut self,sender:SocketAddr)->u32;
     fn parse_route(&mut self,msg:Vec<u8>,addr:SocketAddr)->bool;
-    fn register_connection(&mut self,msg:&[u8],peer:SocketAddr)->bool;
-    fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn property_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn callback_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn function_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn ping_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn time_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn ack_message(&mut self,msg:&[u8],sender:SocketAddr)->bool;
-    fn closed_connection(&mut self,msg:&[u8],peer:SocketAddr)->bool;
-    fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8)->bool;
+    fn register_connection(&mut self,msg:&[u8],peer:SocketAddr,reliability: bool)->bool;
+    fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn property_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn callback_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn function_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn ping_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn time_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn ack_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool;
+    fn closed_connection(&mut self,msg:&[u8],peer:SocketAddr,reliability: bool)->bool;
+    fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8,reliability: bool)->bool;
 	fn update_client(&mut self,peer:SocketAddr)->bool;
 	fn close_stale_connections(&mut self)->bool;
 	fn close_connection(&mut self,uid:&u32)->bool;
+    fn send_object(&mut self,object:ObjectRep,reciever:SocketAddr,reliability:bool)->bool;
+    fn send_property(&mut self,object:ObjectRep,reciever:SocketAddr,reliability:bool)->bool;
 }
 
 use std::borrow::BorrowMut;
 impl Router for Server{
+    
+    fn send_object(&mut self,object:ObjectRep,reciever:SocketAddr,reliability:bool)->bool{
+        return false;
+    }
+    fn send_property(&mut self,object:ObjectRep,reciever:SocketAddr,reliability:bool)->bool{
+        let mut owner_id:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut owner_id, object.owner);
+        let mut prop_id: Vec<u8>= vec![0;4];
+        LittleEndian::write_u32(&mut prop_id, object.oid);
+        
+        let req = MSG_UNRELIABLE;
+        let route = SR_PROPERTYREP;
+        let mut out = vec![req,route];
+        out.extend_from_slice(&owner_id);
+        out.extend_from_slice(&prop_id);
+        out.extend_from_slice(&object.bytes);
+        self.broadcast(&out[0..],reciever,COND_OWNERONLY,reliability);
+        return true
+    }
+    fn resend_acks(&mut self)->bool {
+        let now = Instant::now();
+        let objects = &self.objects.clone();
+
+        let mut drained: Vec<AckMessage> = self.published_acks.drain_filter(|mut e|
+             e.update_time.elapsed().as_secs() > ACK_TIME_SECS
+        ).collect();
+        
+        for ack in drained.iter_mut(){
+            debug!("Sending timed ack for {}", &ack.object);
+            let  connection:SocketAddr = self.connections.iter().find(|(&id,client)| id == ack.client_id).map(|(k,v)| v.addr).unwrap();
+
+            let obj=objects.get(&ack.object).unwrap();
+            ack.update_time = Instant::now();
+            if obj.obj_route == SR_REGISTER_OBJECT {
+                self.send_object(obj.clone(), connection.clone(),true);
+            }else if obj.obj_route == SR_REGISTER_PROPERTY{
+                self.send_property(obj.clone(),connection.clone(),true);
+            }
+        };
+
+        self.published_acks.append(&mut drained);
+        return true;
+    }
+     fn recv_ack(&mut self,client_id:u32, guid:u32)->bool{
+         debug!("Recv Ack [{}]=>{}", client_id, guid);
+         self.published_acks.retain(| i| 
+            (i.client_id!=client_id && i.object != guid)
+        );
+        return true
+     }
     fn get_sender_id(&mut self,sender:SocketAddr)->u32{
          let data_source : &Vec<u32>  =  &self.connections.iter()
         .filter(|&(k,v)| v.addr == sender).map(|(k,v)| *k).collect();
@@ -143,69 +218,69 @@ impl Router for Server{
         let system = msg[1];
         let senderid = self.get_sender_id(peer);
         debug!("C{} S{}, from {}",channel,system,senderid);
-        let mut is_server_request = channel==MSG_WORLD;
-        if channel==MSG_WORLD {
+        let mut is_server_request = channel==MSG_UNRELIABLE || channel==MSG_RELIABLE;
+        if is_server_request {
             match system {
                 SR_REGISTER=>{
-                    self.register_connection(&msg[2..],peer);
+                    self.register_connection(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     ()
                 }
                 SR_TIME=>{
                     if senderid!=0 {
-                        self.time_message(&msg[2..],peer);
+                        self.time_message(&msg[2..],peer, false);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_CALLBACK_UPDATE=>{
                     if senderid!=0 {
-                        self.callback_message(&msg[2..],peer);
+                        self.callback_message(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     }()
                 }
                 SR_PROPERTYREP=>{
                     if senderid==0 {
-                        self.property_message(&msg[0..],peer);
+                        self.property_message(&msg[0..],peer, channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     if senderid!=0 {
-                        self.property_message(&msg[0..],peer);
+                        self.property_message(&msg[0..],peer, channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_FUNCREP=>{
                     if senderid!=0 {
-                        self.function_message(&msg[2..],peer);
+                        self.function_message(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_ACK=>{
                     if senderid!=0 {
-                        self.ack_message(&msg[2..],peer);
+                        self.ack_message(&msg[2..],peer,false);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_RPC=>{
                     if senderid!=0 {
-                        self.rpc_message(&msg[2..],peer);
+                        self.rpc_message(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_CLOSED=>{
                     if senderid!=0 {
-                        self.closed_connection(&msg[2..],peer);
+                        self.closed_connection(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     ()
                 }
                 SR_REGISTRATION_SPAWNED=>{
                     if senderid!=0 {
-                        self.register_object(&msg[2..],peer);
+                        self.register_object(&msg[2..],peer,channel==MSG_RELIABLE);
                         is_server_request=true;
                     }
                     ()
@@ -228,22 +303,22 @@ impl Router for Server{
                 }
                 SR_REGISTER_PROPERTY=>{
                     is_server_request=true;
-                    self.register_property(&msg[2..],peer);
+                    self.register_property(&msg[2..],peer,channel==MSG_RELIABLE);
                     ()
                 }
                 SR_REQUEST_USERSTATE=>{
                     is_server_request=true;
-                    self.userstate(&msg[2..],peer);
+                    self.userstate(&msg[2..],peer,channel==MSG_RELIABLE);
                     ()
                 }
                 SR_REQUEST_OBJECTSTATE=>{
                     is_server_request=true;
-                    self.objectstate(&msg[2..],peer);
+                    self.objectstate(&msg[2..],peer,channel==MSG_RELIABLE);
                     ()
                 }
 				SR_REQUEST_PROPERTYSTATE=>{
                     is_server_request=true;
-                    self.propertystate(&msg[2..],peer);
+                    self.propertystate(&msg[2..],peer,channel==MSG_RELIABLE);
                     ()
                 }
                 SR_UNREGISTER_OBJECT=>{
@@ -251,8 +326,15 @@ impl Router for Server{
                 }
                 SR_VOICE=>{
                     is_server_request=true;
-                    self.voicedata(&msg[0..],peer);
+                    self.voicedata(&msg[0..],peer,channel==MSG_RELIABLE);
                     ()
+                }
+                SR_PUBLISH_ACK=>{
+                    is_server_request=true;
+                    let mut objid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
+                    let client_id = self.get_sender_id(peer);
+                    self.recv_ack(client_id, objid);
+                   // self.recv_published_ack(&msg[0..],peer,false);
                 }
                 _=>{
                     is_server_request=false;
@@ -264,86 +346,125 @@ impl Router for Server{
         }
         return is_server_request;
     }
-    fn closed_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn closed_connection(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         info!("CLOSE Message Event from {}- {} bytes",sender,msg.len());
        let data_source : &Vec<u32>  =  &self.connections.iter()
         .filter(|&(k,v)| v.addr == sender).map(|(k,v)| *k).collect();
         for uid in data_source.iter(){
             &self.connections.remove(uid);
-            let mut msg = vec![MSG_WORLD,SR_CLOSED];
+            let mut msg = vec![MSG_UNRELIABLE,SR_CLOSED];
             let mut wtr:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut wtr, *uid);
             msg.extend_from_slice(&wtr);
             info!("CLOSE Message Event from {} -> {} ",sender,uid);
-            self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
+            self.broadcast(&msg[0..],sender,COND_SKIPOWNER,reliability);
         }
        
         return true;
     }
-    fn register_connection(&mut self,msg:&[u8],sender:SocketAddr)->bool{
-        let s = String::from_utf8_lossy(&msg[4..]);
+    fn register_connection(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
+        let s = String::from_utf8_lossy(&msg[5 ..]);
         debug!("REGISTER Message Event from {}- {} bytes {}",sender,msg.len(),s);
         
-        self.add_connection(&msg[4..],sender);
+        self.add_connection(&msg[4..],sender,reliability);
         return true;
     }
-    fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn rpc_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         debug!("RPC Message Event from {}- {} bytes",sender,msg.len());
-        self.broadcast(&msg[0..],sender,COND_NONE);
+        self.broadcast(&msg[0..],sender,COND_NONE,reliability);
         return true;
 
     }
-    fn property_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn property_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         let mut id = self.get_sender_id(sender);
-        let mut sid=LittleEndian::read_u32(&msg[2 .. 6]);;
+        let sid=LittleEndian::read_u32(&msg[2 .. 6]);
+        let pid=LittleEndian::read_u32(&msg[6 .. 10]);
+        let mut payload:Vec<u8>=msg[11..].to_vec();
         if id==0 {
-             id=LittleEndian::read_u32(&msg[2 .. 6]);
+            id=sid;
              let mut result=self.connections.get_mut(&id);
              match result{
                  Some(client)=>client.addr=sender,
                  None=>println!("Unknown guid {:?}",&id)
              }
         }
-        //  let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
-
-        debug!("PROPERTY Message Event from [{}][{}] {}- {} bytes",id,sid,sender,msg.len());
-        self.broadcast(&msg[0..],sender,COND_SKIPOWNER);
+        self.broadcast(&msg[0..],sender,COND_SKIPOWNER,reliability); // request ack from others
+        if reliability {
+            let readable_id = LittleEndian::read_i32(&msg[6 .. 10]);
+            println!("SENDING ACK BACK {} {:?} {:?}",readable_id,&msg[6 .. 10],&msg);
+                
+            let mut out = vec![MSG_UNRELIABLE,SR_PUBLISH_ACK];
+            out.extend_from_slice(&msg[6 .. 10]);
+            self.broadcast(&out[0..],sender,COND_OWNERONLY,false); //Send return ack.
+        }
+        match  self.objects.get_mut(&pid) {
+            Some(prop)=>{
+                info!("old payload {:?}",&prop.bytes);
+                prop.bytes = payload;
+                info!("updating payload {:?}",&prop.bytes);
+                //self.objects.insert(pid,prop.clone());
+            },
+            None=>{
+                //This is probably a static property - check it.
+                  let new_prop = ObjectRep{
+                    parent_id: 0,
+                    bytes:payload.to_vec(),
+                    oid:pid,
+                    owner:0,
+                    rid:pid,
+                    obj_route: SR_REGISTER_PROPERTY
+                };
+                //handle an unowned object;
+                warn!("No prop found {}",&pid);
+            }
+        }
         return true;
 
     }
-    fn callback_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn callback_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         debug!("CALLBACK Message Event from {}- {} bytes",sender,msg.len());
-        self.broadcast(&msg[0..],sender,COND_NONE);
+        self.broadcast(&msg[0..],sender,COND_NONE,reliability);
         return true;
 
     }
-    fn function_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn function_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         debug!("FUNCTION Message Event from {}- {} bytes",sender,msg.len());
-        self.broadcast(&msg[0..],sender,COND_NONE);
+        self.broadcast(&msg[0..],sender,COND_NONE,reliability);
         return true;
         }
-    fn ping_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn ping_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         debug!("PING Message Event from {}- {} bytes",sender,msg.len());
         return true;
         }
-    fn time_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn time_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         debug!("TIME Message Event from {}- {} bytes",sender,msg.len());
         let tnow: u64 = time::precise_time_ns();
         debug!("Server Time is now {}",tnow);
         let mut wtr:Vec<u8>=vec![0;8];
         LittleEndian::write_u64(&mut wtr, tnow);
         let mut out = vec![0;10];
-        out[0] =MSG_WORLD;
+        out[0] =MSG_UNRELIABLE;
         out[1]=SR_TIME;
         out.append(&mut wtr);
-        self.broadcast(&out[0..],sender,COND_OWNERONLY);
+        self.broadcast(&out[0..],sender,COND_OWNERONLY,reliability);
         return true;
     }
-    fn ack_message(&mut self,msg:&[u8],sender:SocketAddr)->bool{
+    fn ack_message(&mut self,msg:&[u8],sender:SocketAddr,reliability: bool)->bool{
         return true;
     }
 
-    fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8)->bool{
+    fn broadcast(&mut self,msg:&[u8],sender:SocketAddr,rep_condition:u8,reliability: bool)->bool{
+        let mut in_message:&[u8] = &msg.clone();
+        let out:&[u8]=in_message;
+        if reliability && &msg[0] == &MSG_UNRELIABLE{
+            let mut new_message:Vec<u8> = msg.to_vec();
+            new_message[0]=MSG_RELIABLE;
+           let out:&[u8]= &(new_message.clone())[0..];
+           let client_id=&self.get_sender_id(sender);
+        }else{
+            let out:&[u8]=in_message;
+        }
+        
         let mut cond = rep_condition;
         if rep_condition==COND_INITIALONLY || 
             rep_condition==COND_SIMULATEDONLY || 
@@ -357,7 +478,10 @@ impl Router for Server{
          //   debug!("Sending {} bytes, {:?}",msg.len(),&msg[0..]);
         match cond{
             COND_OWNERONLY=>{
-                    drop(self.socket.send_to(&msg[0..],&sender));
+                    drop(self.socket.send_to(&out[0..],&sender));
+                    if reliability{
+                        //self.published_acks.insert(objid,client)
+                    }
                 (true)
             }
             COND_SKIPOWNER=>{
@@ -366,7 +490,7 @@ impl Router for Server{
                     if client.addr != sender {
                         //info!("send to {}",client.addr);
 
-                        drop(self.socket.send_to(&msg[0..],&client.addr));
+                        drop(self.socket.send_to(&out[0..],&client.addr));
                     }
                 }
                 (true)
@@ -374,7 +498,7 @@ impl Router for Server{
             }
             COND_NONE=>{
                 for (id,client) in &self.connections{
-                    drop(self.socket.send_to(&msg[0..],&client.addr));
+                    drop(self.socket.send_to(&out[0..],&client.addr));
                 }
                 (true)
             }
@@ -382,6 +506,7 @@ impl Router for Server{
                 (true)
             }
         }
+        
     }
 	
 	fn update_client(&mut self,peer:SocketAddr)->bool{
@@ -410,7 +535,7 @@ impl Router for Server{
 			self.close_connection(&id);
             let stale_objects:Vec<u32> = self.objects.iter().filter(|(k,v)| v.owner==id).map(|(k,v)| *k).collect();
             for oid in stale_objects{
-                self.unregister_object(oid);
+                self.unregister_object(oid,false);
             }
 		}
         
@@ -441,33 +566,33 @@ pub struct Client {
 }
 
 trait Connections{
-    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool;
-    fn notify_new_connection(&mut self,id:u32)->bool;
-    fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
-    fn rejoin(&mut self, client:Client)->bool;
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr,reliability: bool)->bool;
+    fn notify_new_connection(&mut self,id:u32,reliability: bool)->bool;
+    fn userstate(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
+    fn rejoin(&mut self, client:Client,reliability: bool)->bool;
 }
 trait Objects{
-    fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool;
-    fn unregister_object(&mut self,id:u32)->bool;
-    fn notify_registered_object(&mut self,id:u32)->bool;
-    fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool;
-    fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
-    fn propertystate(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn register_object(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
+    fn unregister_object(&mut self,id:u32,reliability: bool)->bool;
+    fn notify_registered_object(&mut self,id:u32,reliability: bool)->bool;
+    fn register_property(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
+    fn objectstate(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
+    fn propertystate(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
 }
 trait Voice{
-    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool;
+    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool;
 }
 
 impl Voice for Server{
-    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr)->bool{
-       return self.broadcast(&msg[0..],addr,COND_NONE);
+    fn voicedata(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool{
+       return self.broadcast(&msg[0..],addr,COND_NONE,false);
     }
 }
 
 impl Connections for Server{
-    fn rejoin(&mut self,client:Client)->bool{
+    fn rejoin(&mut self,client:Client,reliability: bool)->bool{
         info!("Client rejoining: {} {}",client.guid,client.addr);
-        let mut out = vec![MSG_WORLD,SR_REJOIN];
+        let mut out = vec![MSG_UNRELIABLE,SR_REJOIN];
         let mut wtr:Vec<u8>=vec![0;4];
         LittleEndian::write_u32(&mut wtr, client.guid);
         out.extend_from_slice(&wtr);
@@ -475,15 +600,18 @@ impl Connections for Server{
         let s = String::from_utf8_lossy(&client.settings[0..]);
         println!("result: {} {}", s,&client.settings[0..].len());
         debug!("sending reregisgtered connection: [{}]",client.guid);
-        self.broadcast(&out[0..],client.addr,COND_OWNERONLY);
+        self.broadcast(&out[0..],client.addr,COND_OWNERONLY,false);
         return true;
     }
-    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr)->bool{
+    fn add_connection(&mut self,msg:&[u8], addr:SocketAddr,reliability:bool)->bool{
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let mut x = rng.gen::<u32>();
         let mut preexisting = false;
+        let mut reliable:bool = &msg[0] != &0;
+        let mut payload = &msg[1..];
+        debug!("Adding connection reliably? {}",reliable);
         for (uid,client) in self.connections.iter(){
                 if client.addr==addr{
                     x=client.guid;
@@ -493,7 +621,7 @@ impl Connections for Server{
             instant: Instant::now(),
             guid: x,
             addr: addr,
-            settings: msg.to_vec(),
+            settings: payload.to_vec(),
             last_message:Instant::now(),
         };
         if self.connections.contains_key(&x){
@@ -512,58 +640,59 @@ impl Connections for Server{
          }
         for client in clients{
             if x!=client.guid {
-                let mut out = vec![MSG_WORLD,SR_JOINED];
+                let mut out = vec![MSG_UNRELIABLE,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, new_client.guid);
                 out.extend_from_slice(&wtr);
                 out.extend_from_slice(&new_client.settings[0..]);
                 debug!("sending join connection: [{}] to {} @ {}", x, new_client.guid, client.addr);
-                self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER);
+                self.broadcast(&out[0..],new_client.addr,COND_SKIPOWNER,reliability);
                 
-                let mut out = vec![MSG_WORLD,SR_JOINED];
+                let mut out = vec![MSG_UNRELIABLE,SR_JOINED];
                 let mut wtr:Vec<u8>=vec![0;4];
                 LittleEndian::write_u32(&mut wtr, client.guid);
                 out.extend_from_slice(&wtr);                        
                 out.extend_from_slice(&client.settings[0..]);
                 debug!("sending join connection: [{}] to {} @ {}", x, client.guid, new_client.addr);
-                self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY);
+                self.broadcast(&out[0..],new_client.addr,COND_OWNERONLY,reliability);
             }else{
-                    let mut out = vec![MSG_WORLD,SR_REGISTER];
+                    let mut out = vec![MSG_UNRELIABLE,SR_REGISTER];
                     let mut wtr:Vec<u8>=vec![0;4];
                     LittleEndian::write_u32(&mut wtr, new_client.guid);
                     out.extend_from_slice(&wtr);
+                    out.extend_from_slice(&vec![1,1]);
                     out.extend_from_slice(&new_client.settings[0..]); 
                     let s = String::from_utf8_lossy(&new_client.settings[0..]);
                     println!("result: {} {}", s,&new_client.settings[0..].len());
                     debug!("sending registered connection: [{}]",x);
-                    self.broadcast(&out[0..],addr,COND_OWNERONLY);
+                    self.broadcast(&out[0..],addr,COND_OWNERONLY,reliability);
             }
         }
         return true
     }
 
-    fn notify_new_connection(&mut self,id:u32)->bool{
+    fn notify_new_connection(&mut self,id:u32,reliability: bool)->bool{
         let addr=self.connections[&id].addr;
-        let mut msg = vec![MSG_WORLD,SR_JOINED];
+        let mut msg = vec![MSG_UNRELIABLE,SR_JOINED];
         let mut wtr:Vec<u8>=vec![0;4];
         LittleEndian::write_u32(&mut wtr, id);
         msg.extend_from_slice(&wtr);
-        self.broadcast(&msg[0..],addr,COND_SKIPOWNER);
+        self.broadcast(&msg[0..],addr,COND_SKIPOWNER,reliability);
         debug!("Sending {:?} to {}",msg,COND_SKIPOWNER);
         return true
     }
-    fn userstate(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+    fn userstate(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool{
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         if self.connections.contains_key(&oid) {
             let client:Client= self.connections[&oid].clone();
             let s = String::from_utf8_lossy(&client.settings[0..]);
-			let mut out = vec![MSG_WORLD,SR_JOINED];
+			let mut out = vec![MSG_UNRELIABLE,SR_JOINED];
             let mut wtr:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut wtr, client.guid);
             out.extend_from_slice(&wtr);
             out.extend_from_slice(&client.settings[0..]);
-            self.broadcast(&out[0..],addr,COND_OWNERONLY);
+            self.broadcast(&out[0..],addr,COND_OWNERONLY,reliability);
             drop(self.socket.send_to(&out[0..],&addr));
             debug!("USERSTATE REQUEST Message Event to {} - {:?} ",uid,&out[0..]);
             return true;
@@ -576,27 +705,17 @@ impl Connections for Server{
     }
 }
 impl Objects for Server{
-     fn register_property(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+     fn register_property(&mut self,msg:&[u8],addr:SocketAddr,reliability:bool)->bool{
         use rand::Rng;
         info!("PROPERTY_REGISTRATION Message Event from {}- {} bytes",addr,msg.len());
         let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
-          let mut sender:u32 =LittleEndian::read_u32(&mut &msg[0..4]);
-		let temp = Client{
-				instant: Instant::now(),
-				guid: sender,
-				addr: addr,
-				settings: msg.to_vec(),
-				last_message:Instant::now(),
-			};
-		 self.connections.entry(sender)
-		 // .or_insert_with(||temp)
-		 .and_modify(|e|{  e.addr = addr});
-	
-        let mut parent_id:u32 =LittleEndian::read_u32(&mut &msg[4..8]);
-        let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]);
-        let mut payload = &msg[12..];
+        self.connections.entry(sender).and_modify(|e|{  e.addr = addr});
+
+        let mut parent_id:u32 =LittleEndian::read_u32(&mut &msg[4..8]); //parent object
+        let mut pid:u32 =LittleEndian::read_u32(&mut &msg[8..12]); //original id
+        let mut payload = &msg[12..]; //data
         let mut rng = rand::thread_rng();
-        let mut new_pid = rng.gen::<u32>();
+        let mut new_pid = rng.gen::<u32>(); //sending back guid
         while self.objects.contains_key(&new_pid){
             new_pid = rng.gen::<u32>();
         }
@@ -609,13 +728,14 @@ impl Objects for Server{
             bytes:payload.to_vec(),
             oid:new_pid,
             owner:sender,
-            rid:pid
+            rid:pid,
+            obj_route: SR_REGISTER_PROPERTY,
         };
         //todo add owners to properties.
         self.objects.insert(new_pid,new_prop.clone());
          
         debug!("PROPERTY REGISTRATION [{}] = {}", sender,new_pid);
-        let mut out_sender = vec![MSG_WORLD,SR_REGISTER_PROPERTY];
+        let mut out_sender = vec![MSG_UNRELIABLE,SR_REGISTER_PROPERTY];
         let mut wsender_id:Vec<u8>=vec![0;4];
         LittleEndian::write_u32(&mut wsender_id, new_prop.owner);
         out_sender.extend_from_slice(&wsender_id);
@@ -635,18 +755,18 @@ impl Objects for Server{
         out_sender.extend_from_slice(&payload[0..]);
         debug!("[{:?}] - [{:?}] - [{:?}] [{:?}] {:?}",&wsender_id[0..],&wparent_id[0..], &orig_id[0..],&new_id[0..],&payload[0..]);
         debug!("{:?}",&out_sender[0..]);
-        self.broadcast(&out_sender[0..],addr,COND_NONE);
+        self.broadcast(&out_sender[0..],addr,COND_NONE,reliability);
 
         return true;
      }
      
-    fn unregister_object(&mut self,id:u32)->bool{
+    fn unregister_object(&mut self,id:u32,reliability: bool)->bool{
         if self.objects.contains_key(&id) {
             let object = &self.objects[&id].clone();
             if self.connections.contains_key(&object.owner) {
                 let owner=&self.connections[&object.owner].clone();
             }
-            let mut out_sender = vec![MSG_WORLD,SR_UNREGISTER_OBJECT];
+            let mut out_sender = vec![MSG_UNRELIABLE,SR_UNREGISTER_OBJECT];
             let mut wsender_id:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut wsender_id, object.owner);
             out_sender.extend_from_slice(&wsender_id);
@@ -660,7 +780,7 @@ impl Objects for Server{
         }
         return true;
     }
-     fn register_object(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+     fn register_object(&mut self,msg:&[u8],addr:SocketAddr,reliability:bool)->bool{
         use rand::Rng;
 
         let mut uid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
@@ -685,17 +805,18 @@ impl Objects for Server{
             oid:new_oid,
             bytes:payload.clone(),
             owner: uid,
-            rid: oid
+            rid: oid,
+            obj_route: SR_REGISTER_OBJECT,
         };
         self.objects.insert(new_oid,new_object);
         debug!("1 OBJECT REGISTRATION [{}] {}",uid , new_oid);
-        self.notify_registered_object(oid);
+        self.notify_registered_object(oid,true);
         let mut clients=self.connections.values().cloned()
             .filter(|ref v| v.addr==addr)
             .next().clone();
         let client = clients.unwrap();
        
-            let mut out_sender = vec![MSG_WORLD,SR_REGISTRATION_SPAWNED];
+            let mut out_sender = vec![MSG_UNRELIABLE,SR_REGISTRATION_SPAWNED];
             let mut uid:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut uid, client.guid);
             out_sender.extend_from_slice(&uid);
@@ -707,23 +828,24 @@ impl Objects for Server{
             out_sender.extend_from_slice(&new_id);
             out_sender.extend_from_slice(&payload[0..]);
             debug!("Sending {:?}",&out_sender[0..]);
-            self.broadcast(&out_sender[0..],addr,COND_NONE);
+            self.broadcast(&out_sender[0..],addr,COND_NONE,reliability);
 
 
          return true;
 
      }
-    fn notify_registered_object(&mut self,id:u32)->bool{
+    fn notify_registered_object(&mut self,id:u32,reliability: bool)->bool{
         return false;
     }
-     fn objectstate(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+     fn objectstate(&mut self,msg:&[u8],addr:SocketAddr,reliability:bool)->bool{
         let mut requesterid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         let mut object:ObjectRep;
+        let known:bool = self.objects.contains_key(&oid);
         if self.objects.contains_key(&oid) {
             let object: ObjectRep = self.objects[&oid].clone();
 
-			let mut out_sender = vec![MSG_WORLD,SR_REGISTRATION_SPAWNED];
+			let mut out_sender = vec![MSG_UNRELIABLE,SR_REGISTRATION_SPAWNED];
 
             let mut uid:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut uid, object.parent_id);
@@ -740,14 +862,22 @@ impl Objects for Server{
             debug!("Sending objectstate {}=> {} [{} {} {}]",object.parent_id, addr,oid,requesterid, object.oid);
          
             debug!("Sending objectstate {:?}",&out_sender[0..]);
-            self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
-            return true;
-        }else{
-            warn!("No object found! {} {}",oid, self.objects.len());
-            return false;
+            self.broadcast(&out_sender[0..],addr,COND_OWNERONLY,reliability);
         }
+			let mut out_sender = vec![MSG_UNRELIABLE,SR_REQUEST_OBJECTSTATE];
+            let mut uid:Vec<u8>=vec![0;4];
+            LittleEndian::write_u32(&mut uid, oid);
+            out_sender.extend_from_slice(&uid);
+            let mut payload = vec![0];
+            if known{
+                payload[0]=1;
+            }
+            out_sender.extend_from_slice(&payload);
+            debug!("Sending {} state object {} state to {} ",known,&oid,addr.to_string());
+            self.broadcast(&out_sender[0..],addr,COND_OWNERONLY,reliability);
+            return true;
      }
-       fn propertystate(&mut self,msg:&[u8],addr:SocketAddr)->bool{
+       fn propertystate(&mut self,msg:&[u8],addr:SocketAddr,reliability: bool)->bool{
         let mut requesterid:u32 =LittleEndian::read_u32(&msg[0 .. 4]);
         let mut oid:u32 =LittleEndian::read_u32(&msg[4 .. 8]);
         let mut object:ObjectRep;
@@ -755,7 +885,7 @@ impl Objects for Server{
         if self.objects.contains_key(&oid) {
             let new_prop: ObjectRep = self.objects[&oid].clone();
 
-            let mut out_sender = vec![MSG_WORLD,SR_REGISTER_PROPERTY];
+            let mut out_sender = vec![MSG_UNRELIABLE,SR_REGISTER_PROPERTY];
             let mut wsender_id:Vec<u8>=vec![0;4];
             LittleEndian::write_u32(&mut wsender_id, new_prop.owner);
             out_sender.extend_from_slice(&wsender_id);
@@ -775,7 +905,7 @@ impl Objects for Server{
             out_sender.extend_from_slice(&new_prop.bytes[0..]);
 
             info!("Sending propertystate {}=> {}",oid, addr);
-            self.broadcast(&out_sender[0..],addr,COND_OWNERONLY);
+            self.broadcast(&out_sender[0..],addr,COND_OWNERONLY,reliability);
             return true;
         }else{
             warn!("No property found! {} {}",oid, self.objects.len());
@@ -787,7 +917,6 @@ impl Objects for Server{
 impl Future for Server {
     type Item = ();
     type Error = io::Error;
-
        fn poll(&mut self) -> Poll<(), io::Error> {
         loop {
             if let Some((size, peer)) = self.to_send {
@@ -799,7 +928,7 @@ impl Future for Server {
 						let sr=self.parse_route(cop.clone(),peer);
 						if !sr {
 							debug!("Echoed [{}][{}]{} bytes BACK to {}",&cop[0],&cop[1], size, peer);
-							self.broadcast(&cop[0..],peer,COND_NONE);
+							self.broadcast(&cop[0..],peer,COND_NONE,false);
 						}
 					}else{
                         println!("PONG {:?}",&peer);
@@ -808,7 +937,14 @@ impl Future for Server {
 					debug!("Connections: {}",self.connections.len());
 					debug!("Objects: {}",self.objects.len());
             }
-            self.to_send = Some(try_nb!(self.socket.recv_from(&mut self.buf)));
+
+          for ack in &self.published_acks{
+              println!("prop ack {}=> {}",ack.object, ack.client_id);
+          }
+            self.to_send = Some(try_nb!({
+                debug!("Connections: {}",self.connections.len());
+                self.socket.recv_from(&mut self.buf)
+                }));
         }
     }
 }
@@ -831,7 +967,9 @@ fn app()-> App<'static, 'static> {
             .help("Connection expiration limit")
             .takes_value(true))
 }
-
+extern crate tokio;
+use tokio::prelude::*;
+use tokio::timer::Interval;
 fn main() {
     //! Main.
     env_logger::init();
@@ -849,11 +987,38 @@ fn main() {
     // we'll run the event loop by running the future.
     let mut  connections=HashMap::<u32,Client>::new();
     let mut objects=HashMap::<u32,ObjectRep>::new();
-    l.run(Server{
+    let mut acks:Vec<AckMessage> =vec![];
+
+    //  let task = Interval::new(Instant::now(), Duration::from_millis(100))
+    // //     // .take(10)
+    //      .for_each(move |instant| {
+    //          println!("connections:{}",&connections.len());
+    //         Ok(())
+    //      })
+    //      .map_err(|e| panic!("interval errored; err={:?}", e));
+
+
+    let mut listener = Server{
         socket: socket,
         connections:connections,
         objects:objects,
         buf: vec![0; 65507],
+        published_acks:acks,// object id to ack, user ids that havent responded.
         to_send: None,
-       }).unwrap();
+       };
+    
+    // tokio::spawn(task);
+    // tokio::run(task);
+    l.run(listener.map_err(|e| println!("server error = {:?}", e))).unwrap();
+
+    // Ok();
+    // let task = Interval::new(Instant::now(), Duration::from_millis(100))
+    //     .take(10)
+    //     .for_each(|instant| {
+    //         info!("Connections: {}",listener.connections.len());
+    //         Ok(())
+    //     })
+    //     .map_err(|e| panic!("interval errored; err={:?}", e));
+    // l.run(task).unwrap();
+    // tokio::run(task);
 }
