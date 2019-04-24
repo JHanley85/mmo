@@ -1,0 +1,22 @@
+#
+# Makefile to build TeamSpeak 3 SDK Server Sample on FreeBSD 64-bit
+#
+
+CFLAGS = -Wall -g -O0
+
+all: libs ts3_server_sample
+
+libs: ../../bin/freebsd/amd64/libts3server.so
+	ln -sf ../../bin/freebsd/amd64/libts3server.so .
+
+ts3_server_sample: id_io.o main.o
+	clang -o ts3_server_sample id_io.o main.o -Wl,-rpath,"." -L../../bin/freebsd/amd64 -lts3server
+
+main.o: main.c
+	clang -c -I../../include main.c $(CFLAGS)
+
+id_io.o: id_io.c
+	clang -c -I../../include id_io.c $(CFLAGS)
+
+clean:
+	rm -rf *.o ts3_server_sample

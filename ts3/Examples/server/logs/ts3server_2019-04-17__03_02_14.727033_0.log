@@ -1,0 +1,6 @@
+﻿2019-04-17 03:02:14.735045|INFO    |ServerLibPriv |   |TeamSpeak 3 Server 3.0.4.4 (2018-05-30 11:06:00) SDK
+2019-04-17 03:02:14.747037|INFO    |ServerLibPriv |   |SystemInformation: Windows 10 (17763) x64 (AMD or Intel) Binary: 32bit
+2019-04-17 03:02:14.757036|INFO    |ServerLibPriv |   |Using hardware aes
+2019-04-17 03:02:14.781041|WARNING |Accounting    |   |Unable to find valid license key, falling back to limited functionality
+2019-04-17 03:02:16.916032|INFO    |              |   |Puzzle precompute time: 2093
+2019-04-17 03:02:16.977036|INFO    |VirtualSvrMgr |   |addServer() VirtualServer(1) started
