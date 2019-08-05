@@ -672,7 +672,7 @@ impl Objects for Server{
         let s = String::from_utf8_lossy(&payload[0..]);
         info!("sender:[{}] parent:{} old id {}=>newid {} payload {:?} : {:?}",sender, parent_id,pid,new_pid, s,since_the_epoch);
 
-        let mut client = self.connections.values().cloned().filter(|ref c| c.addr==addr).next().clone().unwrap();
+        let mut client = self.connections.values().cloned().filter(|ref c| c.addr==addr); //.next().clone().unwrap();
         let new_prop = ObjectRep{
             parent_id: parent_id,
             bytes:payload.to_vec(),
