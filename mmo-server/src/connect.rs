@@ -234,6 +234,14 @@ const SR_JOINED:u8=9;
 const SR_CLOSED:u8=10;
 const SR_SESSION_UPDATE:u8=11;
 const SR_PLAYER_STATE_UPDATE:u8=12;
+const SR_REGISTRATION_SPAWNED:u8=13;
+const SR_REGISTER_PROPERTY:u8=14;
+const SR_REQUEST_USERSTATE:u8=15;
+const SR_REQUEST_OBJECTSTATE:u8=16;
+const SR_REQUEST_PROPERTYSTATE:u8=17;
+const SR_REJOIN:u8=18;
+const SR_UNREGISTER_OBJECT:u8=19;
+const SR_VOICE:u8=20;
 //message Relevancy
 const COND_INITIALONLY:u8=0; // - This property will only attempt to send on the initial bunch
 const COND_OWNERONLY:u8=1; // - This property will only send to the actor's owner
@@ -245,6 +253,7 @@ const COND_INITIALOROWNER:u8=6; // - This property will send on the initial pack
 const COND_CUSTOM:u8=7; // - This property has no particular condition, but wants the ability to toggle on/off via SetCustomIsActiveOverride
 const COND_NONE:u8=8; // - This property will send to sender, and all listeners
 const COND_SKIP:u8=0;
+
 
      pub fn register()->Vec<u8>{
          info!("REGISTER send");

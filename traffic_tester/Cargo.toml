@@ -1,0 +1,19 @@
+[package]
+name="traffic_tester"
+description = "A high-performant UDP-based load generator, written in Rust"
+repository = "https://github.com/JHanley85/TrafficTester"
+homepage = "https://github.com/JHanley85/TrafficTester"
+version = "1.0.0"
+authors = ["jack hanley<jack.hanley@redpillvr.com>"]
+
+[dependencies.anevicon]
+git = "https://github.com/Gymmasssorla/anevicon"
+rev = "860369ad6877e28473ba8ced495bf0c567426968"
+
+
+[dependencies]
+clap = "2.24"
+
+[[bin]]
+name = "traffic_tester"
+path = "src/main.rs"

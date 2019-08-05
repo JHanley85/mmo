@@ -1,16 +1,14 @@
 version: '3.3'
 services:
-# token=QWycmC92aYClIuXywNRXfZMhU7QNOoQedFDPg5PI
   teamspeak:
     build: ./ts3
     restart: always
     working_dir: /opt/ts3server/Examples/server
-    #command: ["./ts3_server_sample"]
     command: tail -F anything
     ports:
-      - 9987:9987/udp
-      - 10011:10011
-      - 30033:30033
+      - '9987:9987/udp'
+      - '10011:10011'
+      - '30033:30033'
     environment:
       TS3SERVER_DB_PLUGIN: ts3db_mariadb
       TS3SERVER_DB_SQLCREATEPATH: create_mariadb
@@ -21,7 +19,7 @@ services:
       TS3SERVER_DB_WAITUNTILREADY: 30
       TS3SERVER_LICENSE: accept
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.26
   db:
     image: mariadb
@@ -30,11 +28,10 @@ services:
       MYSQL_ROOT_PASSWORD: example
       MYSQL_DATABASE: teamspeak
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.28
   hamachi:
     image: gfjardim/hamachi
-    # network_mode: host
     volumes:
       - '$HOME/.config/docker/hamachi:/config'
     restart: always
@@ -42,22 +39,32 @@ services:
       - ACCOUNT=$HAM_USER
       - NETWORK=$HAM_NETWORK
       - PASS=$HAM_PASSWORD
-      
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.27
+  bottleneck_tester:
+    build: ./traffic_tester
+    command: tail -F anything
+    networks:
+      app_net:
+        ipv4_address: 192.168.80.29
+    depends_on:
+      - mmo-server1
   mmo-server:
     build: ./mmo-server/.
     command: 'bash -c "cd /release/ && ./mmo-server -a  0.0.0.0:8080"'
     ports:
       - '8010:8080/udp'
+    links:
+      - redis
     environment:
+      - REDIS_URL=192.168.1.30:6379
       - VIRTUAL_PORT=8080
       - VIRTUAL_HOST=mmo.htpc
-      - RUST_BACKTRACE=1
-      - RUST_LOG=debug
+      - RUST_BACKTRACE=full
+      - RUST_LOG=info
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.20
   mmo-server1:
     build: ./mmo-server/.
@@ -69,7 +76,7 @@ services:
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.21
   mmo-server2:
     build: ./mmo-server/.
@@ -81,7 +88,7 @@ services:
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.22
   mmo-server3:
     build: ./mmo-server/.
@@ -94,7 +101,7 @@ services:
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=1
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.23
   mmo-server4:
     build: ./mmo-server/.
@@ -108,7 +115,7 @@ services:
       - RUST_BACKTRACE=1
       - RUST_LOG=debug
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.24
   web:
     build: ./web/.
@@ -129,11 +136,20 @@ services:
     depends_on:
       - mmo-server
     networks:
-      app_net: 
+      app_net:
         ipv4_address: 192.168.80.25
+  redis:
+    image: redis
+    expose:
+      - 6379
+    networks:
+      app_net:
+        ipv4_address: 192.168.80.30
+    ports:
+      - '6379:6379'
 networks:
   app_net:
-    ipam:      
+    ipam:
       config:
         - subnet: 192.168.80.0/24
       driver: default
