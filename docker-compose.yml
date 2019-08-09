@@ -4,7 +4,8 @@ services:
     build: ./ts3
     restart: always
     working_dir: /opt/ts3server/Examples/server
-    command: tail -F anything
+    command: "./ts3_server_sample"
+    #command: tail -F anything
     ports:
       - '9987:9987/udp'
       - '10011:10011'

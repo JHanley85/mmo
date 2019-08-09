@@ -1,4 +1,5 @@
 //Server requests
+    #[derive(PartialEq)]
     pub enum ServerRoute{
         Time=0,
         Register=1,
@@ -22,12 +23,14 @@
         UnregisterObject=19,
         Voice=20,
     }
+    #[derive(PartialEq)]
     pub enum ClientRoute{
         Ping=0,
         World=1,
         Avatar=2,
         ByteArray=4,
     }
+    #[derive(PartialEq)]
     pub enum Relevancy{
         InitialOnly=0, // - This property will only attempt to send on the initial bunch
         OwnerOnly=1, // - This property will only send to the actor's owner

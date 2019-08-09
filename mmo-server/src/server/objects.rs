@@ -3,6 +3,7 @@
 use std::time::{Instant, Duration};
 use std::net::SocketAddr;
 use std::fmt::{Formatter,Error,Display};
+use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
 
 #[derive(Hash, Eq, PartialEq, Debug,Clone)]
 pub struct Client {
@@ -10,19 +11,26 @@ pub struct Client {
     pub guid: u32,
     pub addr: SocketAddr,
     pub settings:Vec<u8>,
-    pub last_message:Instant
+    pub last_message:Instant,
+    pub serialized:Vec<u8>
 }
 
 impl Client{
     pub fn new(_guid:u32,_addr:SocketAddr,_settings:Vec<u8>)->Client{
+        
+        let mut _serialized:Vec<u8>=vec![0;4];
+        LittleEndian::write_u32(&mut _serialized,_guid);
+        _serialized.extend_from_slice(&_settings[0..]);
+
         let client:Client = Client{
             instant: Instant::now(),
             guid:_guid,
             addr: _addr,
             settings:_settings,
-            last_message:Instant::now()
+            last_message:Instant::now(),
+            serialized:_serialized
         };
-        println!("Client Created: {}",client);
+        debug!("Client Created: {}",client);
         return client;
     }
     pub fn last_update(&mut self){

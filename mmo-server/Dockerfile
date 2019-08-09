@@ -15,7 +15,8 @@ RUN ls -al
 # RUN cp /tmp/mmo-mumble/Cargo.toml /usr/src/mmo/mmo-mumble/Cargo.toml
 WORKDIR /usr/src/mmo
 
-RUN cargo build-deps --release
+RUN cargo build-deps
+# --release
 
 COPY . .
 
