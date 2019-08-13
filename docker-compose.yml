@@ -57,9 +57,10 @@ services:
     ports:
       - '8010:8080/udp'
     links:
-      - redis
+      - memcache
     environment:
       - REDIS_URL=192.168.1.30:6379
+      - MEMCACHE_URL=192.168.1.31:11211
       - VIRTUAL_PORT=8080
       - VIRTUAL_HOST=mmo.htpc
       - RUST_BACKTRACE=full
@@ -141,13 +142,26 @@ services:
         ipv4_address: 192.168.80.25
   redis:
     image: redis
-    expose:
-      - 6379
+    ports:
+        - 6379:6379
+    links: 
+        - redis-commander
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    restart: always
+    environment:
+        - REDIS_HOSTS=redis
+    ports:
+        - 8081:8081
+  memcache:
+    image: memcached
+    restart: always
+    ports:
+        - 11211:11211
     networks:
       app_net:
-        ipv4_address: 192.168.80.30
-    ports:
-      - '6379:6379'
+        ipv4_address: 192.168.80.31
 networks:
   app_net:
     ipam:

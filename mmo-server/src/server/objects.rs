@@ -4,15 +4,17 @@ use std::time::{Instant, Duration};
 use std::net::SocketAddr;
 use std::fmt::{Formatter,Error,Display};
 use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
+use serde::{Serialize, Deserialize};
 
-#[derive(Hash, Eq, PartialEq, Debug,Clone)]
+#[derive(Hash, Eq, PartialEq, Debug,Clone,Serialize, Deserialize)]
 pub struct Client {
+    #[serde(skip,default="Instant::now")]
     pub instant: Instant,
     pub guid: u32,
     pub addr: SocketAddr,
     pub settings:Vec<u8>,
+    #[serde(skip,default="Instant::now")]
     pub last_message:Instant,
-    pub serialized:Vec<u8>
 }
 
 impl Client{
@@ -28,10 +30,12 @@ impl Client{
             addr: _addr,
             settings:_settings,
             last_message:Instant::now(),
-            serialized:_serialized
         };
         debug!("Client Created: {}",client);
         return client;
+    }
+    pub fn serialized(self)->Result<String,serde_json::error::Error>{
+        serde_json::to_string(&self)
     }
     pub fn last_update(&mut self){
         self.last_message = Instant::now()
@@ -48,10 +52,8 @@ impl Client{
 		return self.addr == addr;
 		}
 }
-
-
 impl Display for Client {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), Error> {
         write!(fmt, "[{}] {} ", self.guid, self.addr)
     }
 }
@@ -60,23 +62,35 @@ impl Drop for Client {
         println!("Dropping client {}",self);
     }
 }
-
-#[derive(Eq, PartialEq, Debug,Clone)]
+#[derive(Eq, PartialEq, Debug,Clone,Serialize, Deserialize)]
 pub struct ObjectRep{
-    pub oid:u32, // object id
+    pub id:u32, // object id
     pub parent_id:u32, //owning object, if any
     pub bytes:Vec<u8>, //data
-    pub owner:u32, //registering player
-    pub rid:u32  //Origination request id.
+    pub client_id:u32, //registering player
+    pub original_id:u32  //Origination request id
 }
 impl Display for ObjectRep{
-	  fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        write!(fmt, "ObjectID: {} Parent: {} Owner {} RID {} Size {}", self.oid, self.parent_id,self.owner,self.rid,self.bytes.len())
+	  fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), Error> {
+        write!(fmt, "ObjectID: {} Parent: {} Owner {} RID {} Size {}", self.id, self.parent_id,self.client_id,self.original_id,self.bytes.len())
     }
 }
-
 impl Drop for ObjectRep{
     fn drop(&mut self){
         println!("Dropping Object {}",self);
+    }
+}
+impl ObjectRep{
+    pub fn new(object_id: u32, new_id: u32,parent: u32, _bytes:Vec<u8>,_client_id: u32)->ObjectRep{
+        ObjectRep{
+             id: new_id,
+             parent_id:parent,
+             bytes: _bytes,
+             client_id:_client_id,
+             original_id:object_id
+        }
+    }
+    pub fn serialized(self)->Result<String,serde_json::error::Error>{
+        serde_json::to_string(&self)
     }
 }

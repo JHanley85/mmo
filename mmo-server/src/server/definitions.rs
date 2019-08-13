@@ -1,5 +1,6 @@
 //Server requests
-    #[derive(PartialEq)]
+use std::intrinsics::transmute;
+    #[derive(PartialEq,Debug)]
     pub enum ServerRoute{
         Time=0,
         Register=1,
@@ -23,13 +24,25 @@
         UnregisterObject=19,
         Voice=20,
     }
-    #[derive(PartialEq)]
+impl From<u8> for ServerRoute {
+    fn from(t:u8) -> ServerRoute {
+        assert!(ServerRoute::Time as u8 <= t && t <= ServerRoute::Voice as u8);
+        unsafe { transmute(t) }
+    }
+}
+    #[derive(PartialEq,Debug)]
     pub enum ClientRoute{
         Ping=0,
         World=1,
         Avatar=2,
         ByteArray=4,
     }
+impl From<u8> for ClientRoute {
+    fn from(t:u8) -> ClientRoute {
+        assert!(ClientRoute::Ping as u8 <= t && t <= ClientRoute::ByteArray as u8);
+        unsafe { transmute(t) }
+    }
+}
     #[derive(PartialEq)]
     pub enum Relevancy{
         InitialOnly=0, // - This property will only attempt to send on the initial bunch

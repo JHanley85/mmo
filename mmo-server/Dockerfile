@@ -1,7 +1,7 @@
 FROM rustlang/rust:nightly as build
 
 #WORKDIR /usr/src/mmo/mmo-server
-
+RUN rustup default nightly
 RUN cargo install cargo-build-deps
 
 RUN cd /usr/src/ && USER=root cargo new --bin mmo
@@ -23,7 +23,7 @@ COPY . .
 RUN cargo build 
 #--release
 RUN mkdir -p /build-out
-run cp -r target/debug /build-out/
+RUN cp -r target/debug /build-out/
 RUN ls -al /build-out/
 
 # Ubuntu 18.04
