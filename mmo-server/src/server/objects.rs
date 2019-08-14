@@ -7,6 +7,35 @@ use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
 use serde::{Serialize, Deserialize};
 
 #[derive(Hash, Eq, PartialEq, Debug,Clone,Serialize, Deserialize)]
+pub struct KeyStore{
+    pub keys:Vec<ObjectKey>
+}
+impl KeyStore{
+    pub fn new()->KeyStore{
+        KeyStore{
+            keys: vec![]
+        }
+    }
+    pub fn get_client_ids(self)->Vec<String>{
+        self.keys.iter().filter(|s| s.objtype == String::from("client")).map(|s| s.clone().id).collect()
+    }
+    pub fn get_property_ids(self)->Vec<String>{
+        self.keys.iter().filter(|s| s.objtype == String::from("property")).map(|s| s.clone().id).collect()
+
+    }
+    pub fn get_object_ids(self)->Vec<String>{
+        self.keys.iter().filter(|s| s.objtype == String::from("object")).map(|s| s.clone().id).collect()
+
+    }
+    
+}
+#[derive(Hash, Eq, PartialEq, Debug,Clone,Serialize, Deserialize)]
+pub struct ObjectKey{
+    pub id: String,
+    pub objtype: String
+
+}
+#[derive(Hash, Eq, PartialEq, Debug,Clone,Serialize, Deserialize)]
 pub struct Client {
     #[serde(skip,default="Instant::now")]
     pub instant: Instant,

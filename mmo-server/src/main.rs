@@ -16,7 +16,7 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 #![allow(unused_extern_crates)]
-
+#![allow(unused_must_use)]
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -30,7 +30,7 @@ use tokio::net::UdpSocket;
 mod server;
 use server::definitions::{ClientRoute,ServerRoute};
 
-use server::objects::{Client,ObjectRep};
+use server::objects::{Client,ObjectRep,KeyStore,ObjectKey};
 use std::fmt::{Formatter,Display};
 
 struct Server {
@@ -43,6 +43,7 @@ struct Server {
 
 // use std::{thread};
 // use std::io::prelude::*;
+
 
 extern crate byteorder;
 use byteorder::{ByteOrder, LittleEndian,WriteBytesExt};
@@ -109,6 +110,38 @@ impl Server {
         let value = &msg[11..];
         Some(msg[0..].to_vec())
     }
+    async fn get_keys()->Option<KeyStore>{
+        let mut cache = memcache::Client::connect("memcache://memcache:11211?timeout=10&tcp_nodelay=true").unwrap();
+        let value: Option<String> = cache.get("keystore").unwrap();
+        let mut keystore:KeyStore=match value{
+            Some(serialized)=>{
+                  let deserialized=serde_json::from_str(&serialized).unwrap();
+                  println!("KS {:?}",deserialized);
+                  deserialized
+            }
+            None=>{
+                let n = KeyStore::new();
+                let serialized = serde_json::to_string(&n).unwrap();
+                cache.set("keystore",serialized,1_000_000);
+                println!("created keystore");
+                n
+            }
+        };
+        Some(keystore)
+    }
+    async fn set_key(key:String,objtype:String){
+        let s = ObjectKey{
+            id:key,
+            objtype:objtype
+        };
+        let mut cache = memcache::Client::connect("memcache://memcache:11211?timeout=10&tcp_nodelay=true").unwrap();
+        let value: Option<String> = cache.get("keystore").unwrap();
+        let mut keystore=Server::get_keys().await.unwrap();
+        keystore.keys.push(s);
+                let serialized = serde_json::to_string(&keystore).unwrap();
+        cache.set("keystore",serialized,1_000_000);
+
+    }
     async fn world_register_object(msg:Vec<u8>,addr:SocketAddr)->ServerResult{
         use rand::Rng;
         let mut client_id:u32 =LittleEndian::read_u32(&msg[0..4]);
@@ -132,7 +165,6 @@ impl Server {
         println!("Registered OBJECT {}",object.clone());
         Some(_key)
     }
-    
     async fn run(self) -> Result<(), io::Error> {
           let Server {
               mut socket,
@@ -141,36 +173,31 @@ impl Server {
               mut clients,
               mut objects
          } = self;
-       let mut client = memcache::Client::connect("memcache://memcache:11211?timeout=10&tcp_nodelay=true").unwrap();
+       let mut client = memcache::Client::connect("memcache://memcache:11211?timeout=10&tcp_nodelay=true&protocol=ascii").unwrap();
 
         // flush the database
-        client.flush().unwrap();
-
-        // set a string value
-        client.set("foo", "bar", 0).unwrap();
-
-        // retrieve from memcached:
-        let value: Option<String> = client.get("foo").unwrap();
-        let vcopy = value.clone();
-        assert_eq!(value, Some(String::from("bar")));
-        assert_eq!(value.unwrap(), "bar");
-        println!("{:?}",vcopy);
-                loop {
+        client.flush().unwrap();   
+        let n = KeyStore::new();
+        let serialized = serde_json::to_string(&n).unwrap();
+        client.set("keystore",serialized,1_000_000);
+        println!("created keystore");
+            loop {
                      let stats = client.stats().unwrap();
-                     let mut clients = clients;
+                    // let mut clients = clients;
                      println!("Stats: {:?}",stats);
                     // First we check to see if there's a message we need to echo back.
                     // If so then we try to send it back to the original source, waiting
                     // until it's writable and we're able to do so.
                     if let Some((size, peer)) = to_send {
+                       let c= client.stats_items().unwrap();
+                        println!("cs {:?}",c);
                        // let amt = socket.send_to(&buf[..size], &peer).await?;
-                        let result: std::collections::HashMap<String, String> = client.gets(clients.clone().iter().map(|s| &**s).collect()).unwrap(); 
-                        println!("Clients {:?}",result);
+                       // let result: std::collections::HashMap<String, String> = client.gets(clients.clone().iter().map(|s| &**s).collect()).unwrap(); 
+                       // println!("Clients {:?}",result);
                         let bufcopy = buf.clone();
                         let addr = peer.clone();
                     
                         let c=tokio::spawn(async move{
-                            let mut clients = clients;
                             let bufcopy = bufcopy.clone();
                             let addr = addr.clone();
                             let cr= Server::parse_client_route(bufcopy.clone().to_vec()).await.unwrap();
@@ -180,11 +207,12 @@ impl Server {
                                     match Server::world_register(bufcopy.to_vec(),addr).await {
                                         Some(client_key)=>{
                                             println!("client key {}",&client_key);
-                                            clients.push(client_key);
-                                          //  clients.insert(client.guid,client);
+                                            Server::set_key(client_key,String::from("client")).await;
+                                            println!("Client ids: {:?}",Server::get_keys().await.unwrap().get_client_ids());
                                             ()
                                         },
                                         None=>{
+                                            println!("client not registered");
                                         ()
                                         }
                                     }
@@ -195,7 +223,8 @@ impl Server {
                                     match Server::world_register_object(bufcopy.to_vec(),addr).await {
                                         Some(object_key)=>{
                                             println!("object key {}",&object_key);
-                                            objects.push(object_key);
+                                            Server::set_key(object_key,String::from("object"));
+                                          //  objects.push(object_key);
                                         },
                                         None=>{
 
@@ -206,7 +235,7 @@ impl Server {
                                     println!("property replication");
                                     match Server::replicate_property(bufcopy.to_vec(),addr).await{
                                         Some(echo)=>{
-                                            println!("object property update {:?}",&echo);
+                                            //println!("object property update {:?}",&echo);
                                         
                                         },
                                         None=>{
@@ -219,7 +248,8 @@ impl Server {
                                     match Server::register_property(bufcopy.to_vec(),addr).await{
                                         Some(object_key)=>{
                                             println!("property registration {}",&object_key);
-                                            objects.push(object_key);
+                                            Server::set_key(object_key,String::from("property"));
+                                          //  objects.push(object_key);
                                         },
                                         None=>{
 

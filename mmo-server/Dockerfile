@@ -7,6 +7,9 @@ RUN cargo install cargo-build-deps
 RUN cd /usr/src/ && USER=root cargo new --bin mmo
 WORKDIR /usr/src/mmo
 COPY Cargo.toml ./Cargo.toml
+RUN mkdir -p src/rust-memcache
+#COPY ./src/rust-memcache/Cargo.toml ./src/rust-memcache/Cargo.toml
+COPY ./src/rust-memcache    ./src/rust-memcache
 RUN ls -al
 
 #RUN cp /tmp/Cargo.toml /usr/src/mmo/Cargo.toml
